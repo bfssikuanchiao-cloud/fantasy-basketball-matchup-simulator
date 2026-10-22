@@ -7,6 +7,7 @@ import numpy as np
 import pandas as pd
 import requests
 import streamlit as st
+import unicodedata
 
 import matplotlib.pyplot as plt
 import seaborn as sns
@@ -81,6 +82,32 @@ CACHE_DIR.mkdir(
 # 1. FIND PLAYERS
 # ============================================================
 
+def normalize_player_name(name):
+
+    normalized = unicodedata.normalize(
+        "NFKD",
+        str(name)
+    )
+
+    normalized = "".join(
+        character
+        for character in normalized
+        if not unicodedata.combining(character)
+    )
+
+    normalized = normalized.casefold()
+
+    normalized = re.sub(
+        r"[^a-z0-9]+",
+        " ",
+        normalized
+    )
+
+    return " ".join(
+        normalized.split()
+    )
+
+
 @st.cache_data
 def get_current_players():
     return CommonAllPlayers(
@@ -88,58 +115,140 @@ def get_current_players():
     ).get_data_frames()[0]
 
 def find_player(name):
-    CURRENT_PLAYERS = get_current_players()
-    matches = CURRENT_PLAYERS[
-        CURRENT_PLAYERS["DISPLAY_FIRST_LAST"]
-        .str.lower()
-        .eq(name.lower())
+
+    input_name = str(
+        name
+    ).strip()
+
+    if not input_name:
+        raise ValueError(
+            "球員名字不可為空白"
+        )
+
+    normalized_input = normalize_player_name(
+        input_name
+    )
+
+    all_players = players.get_players()
+
+    # ========================================================
+    # 1. NORMALIZED EXACT MATCH
+    # ========================================================
+    exact_matches = [
+        player
+        for player in all_players
+        if normalize_player_name(
+            player.get(
+                "full_name",
+                ""
+            )
+        ) == normalized_input
     ]
 
-    if matches.empty:
+    active_exact_matches = [
+        player
+        for player in exact_matches
+        if player.get(
+            "is_active",
+            False
+        )
+    ]
 
-        matches = CURRENT_PLAYERS[
-            CURRENT_PLAYERS["DISPLAY_FIRST_LAST"]
-            .str.contains(
-                name,
-                case=False,
-                na=False
+    if len(active_exact_matches) == 1:
+
+        matched_player = (
+            active_exact_matches[0]
+        )
+
+    elif len(exact_matches) == 1:
+
+        matched_player = exact_matches[0]
+
+    else:
+
+        # ====================================================
+        # 2. NORMALIZED PARTIAL MATCH
+        # ====================================================
+        partial_matches = [
+            player
+            for player in all_players
+            if normalized_input
+            in normalize_player_name(
+                player.get(
+                    "full_name",
+                    ""
+                )
             )
         ]
 
-    if matches.empty:
-        raise ValueError(
-            f"找不到球員：{name}"
-        )
+        active_partial_matches = [
+            player
+            for player in partial_matches
+            if player.get(
+                "is_active",
+                False
+            )
+        ]
 
-    if len(matches) > 1:
+        if len(active_partial_matches) == 1:
 
-        print(
-            f"\n找到多位符合 '{name}' 的球員："
-        )
-
-        for _, row in matches.iterrows():
-            print(
-                row["PERSON_ID"],
-                row["DISPLAY_FIRST_LAST"]
+            matched_player = (
+                active_partial_matches[0]
             )
 
-        raise ValueError(
-            "請輸入更完整的球員名字"
-        )
+        elif len(partial_matches) == 1:
 
-    player = matches.iloc[0]
+            matched_player = (
+                partial_matches[0]
+            )
+
+        elif not partial_matches:
+
+            raise ValueError(
+                f"找不到球員：{name}"
+            )
+
+        else:
+
+            matching_names = [
+                player.get(
+                    "full_name",
+                    ""
+                )
+                for player in partial_matches
+            ]
+
+            raise ValueError(
+                f"找到多位符合 '{name}' 的球員："
+                f"{matching_names}。"
+                "請輸入更完整的球員名字。"
+            )
+
+    player_id = int(
+        matched_player["id"]
+    )
+
+    official_name = str(
+        matched_player["full_name"]
+    ).strip()
 
     print(
-        f"Matched: "
-        f"{player['DISPLAY_FIRST_LAST']} "
-        f"(NBA ID: {player['PERSON_ID']})"
+        f"Matched locally: "
+        f"{official_name} "
+        f"(NBA ID: {player_id})"
     )
 
     return {
-        "id": int(player["PERSON_ID"]),
-        "full_name": player["DISPLAY_FIRST_LAST"],
-        "is_active": True
+        "id": player_id,
+        "full_name": official_name,
+        "is_active": bool(
+            matched_player.get(
+                "is_active",
+                False
+            )
+        )
     }
+
 
 # ============================================================
 # 2. SAFE CACHE FILE NAME
@@ -173,14 +282,73 @@ def get_player_cache_path(
     player_name
 ):
 
-    file_name = make_safe_cache_name(
-        player_id=player_id,
-        player_name=player_name
+    expected_file_name = (
+        make_safe_cache_name(
+            player_id=player_id,
+            player_name=player_name
+        )
     )
 
-    return CACHE_DIR / file_name
+    expected_path = (
+        CACHE_DIR
+        / expected_file_name
+    )
 
+    # ========================================================
+    # 1. USE THE EXPECTED CACHE FILE WHEN IT EXISTS
+    # ========================================================
+    if expected_path.exists():
 
+        return expected_path
+
+    # ========================================================
+    # 2. FALLBACK: SEARCH BY NBA PLAYER ID
+    #
+    # Examples:
+    # 1631217_moussa_diabat.pkl
+    # 1631217_moussa_diabate.pkl
+    #
+    # Both are accepted because the NBA ID is the stable key.
+    # ========================================================
+    matching_paths = sorted(
+        CACHE_DIR.glob(
+            f"{int(player_id)}_*.pkl"
+        )
+    )
+
+    if len(matching_paths) == 1:
+
+        matched_path = matching_paths[0]
+
+        print(
+            f"Cache matched by player ID: "
+            f"{player_name} -> "
+            f"{matched_path.name}"
+        )
+
+        return matched_path
+
+    if len(matching_paths) > 1:
+
+        matching_names = [
+            path.name
+            for path in matching_paths
+        ]
+
+        raise RuntimeError(
+            f"{player_name} 的 NBA ID "
+            f"{player_id} 找到多個 Cache："
+            f"{matching_names}。"
+            "請保留正確的單一 pkl 檔案。"
+        )
+
+    # ========================================================
+    # 3. NO CACHE EXISTS
+    #
+    # Return the expected path so save_player_cache() can
+    # create a new file at the standard location.
+    # ========================================================
+    return expected_path
 # ============================================================
 # 4. CREATE EMPTY PLAYER CACHE
 # ============================================================
