@@ -83,15 +83,12 @@ CACHE_DIR.mkdir(
 
 @st.cache_data
 def get_current_players():
-
     return CommonAllPlayers(
         is_only_current_season=1
     ).get_data_frames()[0]
-    
-CURRENT_PLAYERS = get_current_players()
 
 def find_player(name):
-
+    CURRENT_PLAYERS = get_current_players()
     matches = CURRENT_PLAYERS[
         CURRENT_PLAYERS["DISPLAY_FIRST_LAST"]
         .str.lower()
@@ -396,7 +393,7 @@ def get_current_player_team(
             cached_team
         ).strip().upper()
 
-        if cached_team in {
+        if cached_team not in {
             "",
             "NONE",
             "NAN",
@@ -404,7 +401,17 @@ def get_current_player_team(
             "0"
         }:
 
-            cached_team = None
+            print(
+                f"Current team loaded from cache: "
+                f"{player_name} -> {cached_team}"
+            )
+
+            return cached_team
+
+    print(
+        f"Current team cache missing: "
+        f"{player_name}"
+    )
 
     try:
 
@@ -421,30 +428,10 @@ def get_current_player_team(
             .get_data_frame()
         )
 
-        if not isinstance(
-            player_info_df,
-            pd.DataFrame
-        ):
-
-            raise ValueError(
-                "CommonPlayerInfo did not return "
-                "a DataFrame"
-            )
-
         if player_info_df.empty:
 
             raise ValueError(
                 "CommonPlayerInfo returned no rows"
-            )
-
-        if (
-            "TEAM_ABBREVIATION"
-            not in player_info_df.columns
-        ):
-
-            raise ValueError(
-                "CommonPlayerInfo result is missing "
-                "TEAM_ABBREVIATION"
             )
 
         current_team = str(
@@ -452,20 +439,6 @@ def get_current_player_team(
                 "TEAM_ABBREVIATION"
             ]
         ).strip().upper()
-
-        invalid_team_values = {
-            "",
-            "NONE",
-            "NAN",
-            "NULL",
-            "0"
-        }
-
-        if current_team in invalid_team_values:
-
-            raise ValueError(
-                "TEAM_ABBREVIATION is empty"
-            )
 
         cache["current_team"] = current_team
 
@@ -485,7 +458,7 @@ def get_current_player_team(
     except Exception as error:
 
         print(
-            f"WARNING: Could not refresh current team "
+            f"WARNING: Could not obtain current team "
             f"for {player_name}"
         )
 
@@ -494,21 +467,10 @@ def get_current_player_team(
             f"{error}"
         )
 
-        if cached_team is not None:
-
-            print(
-                f"Using cached current team: "
-                f"{player_name} -> {cached_team}"
-            )
-
-            return cached_team
-
         raise RuntimeError(
-            f"無法取得 {player_name} 的目前球隊，"
-            "而且 Cache 中沒有可用的 current_team。"
-            "請再次按下 Load，讓程式重新嘗試 NBA API。"
+            f"{player_name} 沒有可用 current_team cache，"
+            f"且 NBA API 查詢失敗。"
         ) from error
-
 
 # ============================================================
 # 8. CHECK WHETHER A SEASON EXISTS IN CACHE
