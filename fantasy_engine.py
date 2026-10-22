@@ -6,16 +6,18 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 import requests
+import streamlit as st
 
 import matplotlib.pyplot as plt
 import seaborn as sns
-
+from nba_api.stats.endpoints.commonallplayers import CommonAllPlayers
 from nba_api.stats.static import players
 from nba_api.stats.static import players
 from nba_api.stats.endpoints import (
     playergamelog,
     commonplayerinfo,
 )
+
 
 # ============================================================
 # 0. MODEL SETTINGS
@@ -79,68 +81,68 @@ CACHE_DIR.mkdir(
 # 1. FIND PLAYER
 # ============================================================
 
+@st.cache_data
+def get_current_players():
+
+    return CommonAllPlayers(
+        is_only_current_season=1
+    ).get_data_frames()[0]
+    
+CURRENT_PLAYERS = get_current_players()
+
 def find_player(name):
 
-    result = players.find_players_by_full_name(
-        name
-    )
+    matches = CURRENT_PLAYERS[
+        CURRENT_PLAYERS["DISPLAY_FIRST_LAST"]
+        .str.lower()
+        .eq(name.lower())
+    ]
 
-    if not result:
+    if matches.empty:
 
-        result = players.find_players_by_last_name(
-            name
-        )
+        matches = CURRENT_PLAYERS[
+            CURRENT_PLAYERS["DISPLAY_FIRST_LAST"]
+            .str.contains(
+                name,
+                case=False,
+                na=False
+            )
+        ]
 
-    if not result:
-
+    if matches.empty:
         raise ValueError(
             f"找不到球員：{name}"
         )
 
-    if len(result) > 1:
+    if len(matches) > 1:
 
-        active_players = [
-            player
-            for player in result
-            if player.get(
-                "is_active",
-                False
-            )
-        ]
+        print(
+            f"\n找到多位符合 '{name}' 的球員："
+        )
 
-        if len(active_players) == 1:
-
-            result = active_players
-
-        else:
-
+        for _, row in matches.iterrows():
             print(
-                f"\n找到多位符合 '{name}' 的球員："
+                row["PERSON_ID"],
+                row["DISPLAY_FIRST_LAST"]
             )
 
-            for player in result:
+        raise ValueError(
+            "請輸入更完整的球員名字"
+        )
 
-                print(
-                    player["id"],
-                    player["full_name"],
-                    "Active:",
-                    player["is_active"]
-                )
-
-            raise ValueError(
-                "請輸入更完整的球員名字"
-            )
-
-    player = result[0]
+    player = matches.iloc[0]
 
     print(
         f"Matched: "
-        f"{player['full_name']} "
-        f"(NBA ID: {player['id']})"
+        f"{player['DISPLAY_FIRST_LAST']} "
+        f"(NBA ID: {player['PERSON_ID']})"
     )
 
-    return player
-
+    return {
+        "id": int(player["PERSON_ID"]),
+        "full_name": player["DISPLAY_FIRST_LAST"],
+        "is_active": True
+    }
 
 # ============================================================
 # 2. SAFE CACHE FILE NAME

@@ -5,6 +5,3 @@ matplotlib
 seaborn
 nba_api
 requests
-pickle
-re
-pathlib
