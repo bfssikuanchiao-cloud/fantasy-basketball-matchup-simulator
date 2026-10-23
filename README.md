@@ -1,16 +1,97 @@
-# fantasy-basketball-matchup-simulator
-A Python project for Yahoo Fantasy Basketball matchup analysis and Monte Carlo simulation.
-Fantasy Basketball Matchup Simulator
-A personal, non-commercial Python project for fantasy basketball analytics.
+# 秘密結社夢幻籃球模擬器 
 
-The project uses statistical simulation to analyze Yahoo Fantasy Basketball matchups, rosters, and player data.
+網站功能與蒙地卡羅模型簡介 
 
-Purpose
-The application is intended for personal fantasy basketball analysis, including matchup simulation and roster decision support.
+Fantasy Basketball H2H 9-Cat Add / Drop Decision Tool 
 
-Technology
-Python
-Jupyter Notebook
-Monte Carlo simulation
-Yahoo Fantasy Sports API
-NBA data
+它不只比較球員平均數據，而是回答：在目前戰況與剩餘賽程下，一次 Add / Drop 會讓本週勝率改變多少？ 
+
+1. 這個網站能做什麼？ 
+
+本網站是一個以機率為核心的 H2H 傳統九項分析工具。使用者輸入雙方陣容、Fantasy Week 日期、目前累積數據，以及想測試的球員異動後，系統會比較原陣容與 Add / Drop 情境。 
+
+直接貼上 Yahoo roster，或以每行一名球員的格式匯入雙方陣容。 
+
+載入球員多賽季逐場比賽紀錄；目前程式設定涵蓋 2018-19 至 2026-27 球季。 
+
+依指定日期讀取剩餘 NBA 賽程，逐場考慮對手與主、客場環境。 
+
+把目前 matchup 累積成績納入計算，而不是重新模擬整個星期。 
+
+比較 Baseline 與 Add / Drop 後的九項勝率、最終比分分布及整體取勝目標。 
+
+以圖表和模擬抽樣明細顯示結果，方便檢查模型如何形成結論。 
+
+2. 模型如何運作？ 
+
+1. 歷史資料：系統使用球員實際逐場 box score，而非只看球季平均值。歷史資料會合併成多賽季資料池，近期比賽具有較高抽樣權重。 
+
+2. 配合未來賽程：對每一場尚未進行的 NBA 比賽，模型會根據比賽日期、主客場與對手，建立專屬的歷史抽樣機率。 
+
+3. 整場數據一起抽樣：一次抽取一場完整歷史 box score，因此得分、籃板、助攻、命中數、出手數等數據會保持同一場比賽中的實際組合。 
+
+4. 重複建立可能的未來：模型反覆模擬雙方剩餘賽程，將模擬結果加上目前 matchup 累積數據，再判定九個類別的勝負。 
+
+5. 比較操作前後：Baseline 與 Add / Drop 使用相同的分析框架與隨機種子，以減少無關的模擬波動，讓差異更集中反映陣容變動。 
+
+3. 九項如何判定？ 
+
+模型分析 FG%、FT%、PTS、REB、AST、STL、BLK、3PM 與 TO。除失誤越低越好之外，其餘類別皆以較高者獲勝。FG% 與 FT% 由模擬後的命中數及出手數重新計算，保留投籃量的影響。 
+
+4. 網站會提供哪些結果？ 
+
+九項勝率比較：顯示每個 category 在 Baseline 與 Add / Drop 下的勝率，以及變動的百分點。 
+
+整體目標機率：顯示至少贏 5、6、7 項的機率，即 P(Score ≥ 5)、P(Score ≥ 6) 與 P(Score ≥ 7)。 
+
+H2H 最終比分分布：比較 0:9 至 9:0 每一種結果在 Baseline 與 Add / Drop 下的出現機率。 
+
+三層 Heatmap：呈現九項勝率、Add / Drop 勝率變化，以及 Baseline 每位球員對預期未來產出的貢獻比例。 
+
+模擬觀測工具：展示抽取的模擬世界、雙方團隊總數與逐球員 breakdown，協助使用者檢查模型結果。 
+
+5. 為什麼使用蒙地卡羅模擬？ 
+
+Fantasy matchup 的結果不是單一平均值可以完整描述的。球員表現、剩餘場次與九項之間都存在波動。蒙地卡羅模擬的優點，是把這些不確定性轉換成可直接比較的機率。 
+
+呈現不確定性：不是只給一個預測比分，而是顯示各種比分與各項勝率的完整分布。 
+
+保留真實比賽型態：模型從實際逐場紀錄抽樣，不必強迫得分、抄截或阻攻服從同一種理論分布。 
+
+保留同場數據關係：整場 box score 一起抽取，可避免把不同歷史比賽的得分、籃板與命中率任意拼接成不自然的表現。 
+
+適合比較策略：可直接量化一次 Add / Drop 對特定 matchup 的幫助與代價，而不是只判斷哪位球員整體較強。 
+
+容易解讀風險與上限：例如兩個方案的 5-4 機率相近，但其中一個方案可能有更高的 6-3 或 7-2 上限。比分分布能把這種差異顯示出來。 
+
+能隨資料與賽程更新：當目前比分、球員資料或剩餘賽程改變時，可重新模擬並得到符合當下狀態的結果。 
+
+簡單來說：傳統平均值告訴你「通常會發生什麼」；蒙地卡羅模擬則告訴你「各種結果分別有多大機率發生」。 
+
+6. 如何閱讀結果？ 
+
+先看 P(Score ≥ 5) 的變化，判斷操作是否提高至少贏下 matchup 的機率。 
+
+再看各 category 的 Delta，確認收益來自哪些項目，以及犧牲了哪些項目。 
+
+最後查看比分分布，判斷機率是否由 4:5、5:4 移向 6:3、7:2等更有利結果。 
+
+若結果非常接近，可增加模擬次數，並結合球員傷病、出賽狀態與實際 lineup 判斷。 
+
+7. 目前版本的重要限制 
+
+Yahoo Fantasy API 尚未接入，陣容與目前 matchup totals 仍需由使用者輸入。 
+
+目前假設輸入名單中的球員在日期範圍內的所有 NBA 比賽都計入 matchup；尚未處理每日 active slots、bench、IL、位置資格及名額衝突。 
+
+模型保留單一球員同場各項數據的關係，但尚未特別建模不同球員之間的相關性。 
+
+Category 平手目前不計為勝利。 
+
+近期、主客場與相同對手的權重仍屬模型假設，尚需透過 out-of-sample backtesting 驗證。 
+
+模擬提供決策參考，不保證真實結果；臨時傷病、輪休、交易與角色變動可能使歷史資料失去代表性。 
+
+總結 
+
+這個網站的核心價值，不是替使用者挑出「平均數據最漂亮」的球員，而是把目前比分、剩餘賽程、歷史逐場表現與 Add / Drop 情境放入同一個機率框架。使用者可以更清楚地看到一項操作如何改變九項勝率、最終比分分布，以及本週 matchup 的整體上限與風險。 
