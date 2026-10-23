@@ -6,16 +6,19 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 import requests
+import streamlit as st
+import unicodedata
 
 import matplotlib.pyplot as plt
 import seaborn as sns
+from nba_api.stats.endpoints.commonallplayers import CommonAllPlayers
+from nba_api.stats.static import players
 
-from nba_api.stats.static import players
-from nba_api.stats.static import players
 from nba_api.stats.endpoints import (
     playergamelog,
     commonplayerinfo,
 )
+
 
 # ============================================================
 # 0. MODEL SETTINGS
@@ -76,70 +79,249 @@ CACHE_DIR.mkdir(
 
 
 # ============================================================
-# 1. FIND PLAYER
+# 1. FIND PLAYERS
 # ============================================================
+
+def normalize_player_name(name):
+
+    normalized = unicodedata.normalize(
+        "NFKD",
+        str(name)
+    )
+
+    normalized = "".join(
+        character
+        for character in normalized
+        if not unicodedata.combining(character)
+    )
+
+    normalized = normalized.casefold()
+
+    normalized = re.sub(
+        r"[^a-z0-9]+",
+        " ",
+        normalized
+    )
+
+    return " ".join(
+        normalized.split()
+    )
+
+
+@st.cache_data
+def get_current_players():
+    return CommonAllPlayers(
+        is_only_current_season=1
+    ).get_data_frames()[0]
 
 def find_player(name):
 
-    result = players.find_players_by_full_name(
+    input_name = str(
         name
+    ).strip()
+
+    if not input_name:
+        raise ValueError(
+            "球員名字不可為空白"
+        )
+
+    normalized_input = normalize_player_name(
+        input_name
     )
 
-    if not result:
+    all_players = players.get_players()
+    match_source = "local"
+    # ========================================================
+    # 1. NORMALIZED EXACT MATCH
+    # ========================================================
+    exact_matches = [
+        player
+        for player in all_players
+        if normalize_player_name(
+            player.get(
+                "full_name",
+                ""
+            )
+        ) == normalized_input
+    ]
 
-        result = players.find_players_by_last_name(
-            name
+    active_exact_matches = [
+        player
+        for player in exact_matches
+        if player.get(
+            "is_active",
+            False
+        )
+    ]
+
+    if len(active_exact_matches) == 1:
+
+        matched_player = (
+            active_exact_matches[0]
         )
 
-    if not result:
+    elif len(exact_matches) == 1:
 
-        raise ValueError(
-            f"找不到球員：{name}"
-        )
+        matched_player = exact_matches[0]
 
-    if len(result) > 1:
+    else:
 
-        active_players = [
+        # ====================================================
+        # 2. NORMALIZED PARTIAL MATCH
+        # ====================================================
+        partial_matches = [
             player
-            for player in result
+            for player in all_players
+            if normalized_input
+            in normalize_player_name(
+                player.get(
+                    "full_name",
+                    ""
+                )
+            )
+        ]
+
+        active_partial_matches = [
+            player
+            for player in partial_matches
             if player.get(
                 "is_active",
                 False
             )
         ]
 
-        if len(active_players) == 1:
+        if len(active_partial_matches) == 1:
 
-            result = active_players
+            matched_player = (
+                active_partial_matches[0]
+            )
+
+        elif len(partial_matches) == 1:
+
+            matched_player = (
+                partial_matches[0]
+            )
+
+        elif not partial_matches:
+
+            print(
+                f"[FALLBACK] "
+                f"Trying CommonAllPlayers for "
+                f"{input_name}"
+            )
+        
+            try:
+        
+                current_players = (
+                    get_current_players()
+                )
+        
+                current_players = (
+                    current_players.copy()
+                )
+        
+                current_players[
+                    "normalized_name"
+                ] = (
+                    current_players[
+                        "DISPLAY_FIRST_LAST"
+                    ]
+                    .apply(
+                        normalize_player_name
+                    )
+                )
+        
+                fallback_matches = (
+                    current_players[
+                        current_players[
+                            "normalized_name"
+                        ]
+                        == normalized_input
+                    ]
+                )
+        
+                if len(fallback_matches) == 1:
+                    match_source = "CommonAllPlayers"
+                    row = fallback_matches.iloc[0]
+        
+                    matched_player = {
+                        "id": int(
+                            row["PERSON_ID"]
+                        ),
+                        "full_name": str(
+                            row[
+                                "DISPLAY_FIRST_LAST"
+                            ]
+                        ).strip(),
+                        "is_active": True
+                    }
+        
+                    print(
+                        f"[FALLBACK_SUCCESS] "
+                        f"{matched_player['full_name']} "
+                        f"(NBA ID: {matched_player['id']})"
+                    )
+        
+                else:
+        
+                    raise ValueError(
+                        f"找不到球員：{name}"
+                    )
+        
+            except Exception as error:
+
+                print(
+                    f"[FALLBACK_FAILURE] "
+                    f"player={input_name} "
+                    f"error={type(error).__name__}: {error}"
+                )
+            
+                raise ValueError(
+                    f"本地球員名單找不到球員：{name}；"
+                    "CommonAllPlayers fallback 亦查詢失敗。"
+                ) from error
 
         else:
 
-            print(
-                f"\n找到多位符合 '{name}' 的球員："
-            )
-
-            for player in result:
-
-                print(
-                    player["id"],
-                    player["full_name"],
-                    "Active:",
-                    player["is_active"]
+            matching_names = [
+                player.get(
+                    "full_name",
+                    ""
                 )
+                for player in partial_matches
+            ]
 
             raise ValueError(
-                "請輸入更完整的球員名字"
+                f"找到多位符合 '{name}' 的球員："
+                f"{matching_names}。"
+                "請輸入更完整的球員名字。"
             )
 
-    player = result[0]
-
-    print(
-        f"Matched: "
-        f"{player['full_name']} "
-        f"(NBA ID: {player['id']})"
+    player_id = int(
+        matched_player["id"]
     )
 
-    return player
+    official_name = str(
+        matched_player["full_name"]
+    ).strip()
+
+    print(
+        f"[PLAYER_MATCH] "
+        f"source={match_source} "
+        f"player={official_name} "
+        f"player_id={player_id}"
+    )
+
+    return {
+        "id": player_id,
+        "full_name": official_name,
+        "is_active": bool(
+            matched_player.get(
+                "is_active",
+                False
+            )
+        )
+    }
 
 
 # ============================================================
@@ -174,14 +356,73 @@ def get_player_cache_path(
     player_name
 ):
 
-    file_name = make_safe_cache_name(
-        player_id=player_id,
-        player_name=player_name
+    expected_file_name = (
+        make_safe_cache_name(
+            player_id=player_id,
+            player_name=player_name
+        )
     )
 
-    return CACHE_DIR / file_name
+    expected_path = (
+        CACHE_DIR
+        / expected_file_name
+    )
 
+    # ========================================================
+    # 1. USE THE EXPECTED CACHE FILE WHEN IT EXISTS
+    # ========================================================
+    if expected_path.exists():
 
+        return expected_path
+
+    # ========================================================
+    # 2. FALLBACK: SEARCH BY NBA PLAYER ID
+    #
+    # Examples:
+    # 1631217_moussa_diabat.pkl
+    # 1631217_moussa_diabate.pkl
+    #
+    # Both are accepted because the NBA ID is the stable key.
+    # ========================================================
+    matching_paths = sorted(
+        CACHE_DIR.glob(
+            f"{int(player_id)}_*.pkl"
+        )
+    )
+
+    if len(matching_paths) == 1:
+
+        matched_path = matching_paths[0]
+
+        print(
+            f"Cache matched by player ID: "
+            f"{player_name} -> "
+            f"{matched_path.name}"
+        )
+
+        return matched_path
+
+    if len(matching_paths) > 1:
+
+        matching_names = [
+            path.name
+            for path in matching_paths
+        ]
+
+        raise RuntimeError(
+            f"{player_name} 的 NBA ID "
+            f"{player_id} 找到多個 Cache："
+            f"{matching_names}。"
+            "請保留正確的單一 pkl 檔案。"
+        )
+
+    # ========================================================
+    # 3. NO CACHE EXISTS
+    #
+    # Return the expected path so save_player_cache() can
+    # create a new file at the standard location.
+    # ========================================================
+    return expected_path
 # ============================================================
 # 4. CREATE EMPTY PLAYER CACHE
 # ============================================================
@@ -377,12 +618,19 @@ def save_player_cache(
 # Raise an error instead of using an old historical team.
 # ============================================================
 
+
 def get_current_player_team(
     player_id,
     player_name,
     cache,
     timeout=60
 ):
+
+    print(
+        f"[TEAM_LOOKUP] "
+        f"player={player_name} "
+        f"player_id={player_id}"
+    )
 
     cached_team = cache.get(
         "current_team"
@@ -394,7 +642,7 @@ def get_current_player_team(
             cached_team
         ).strip().upper()
 
-        if cached_team in {
+        if cached_team not in {
             "",
             "NONE",
             "NAN",
@@ -402,9 +650,29 @@ def get_current_player_team(
             "0"
         }:
 
-            cached_team = None
+            print(
+                f"[CACHE_HIT] "
+                f"field=current_team "
+                f"player={player_name} "
+                f"value={cached_team}"
+            )
+
+            return cached_team
+
+    print(
+        f"[CACHE_MISS] "
+        f"field=current_team "
+        f"player={player_name}"
+    )
 
     try:
+
+        print(
+            f"[NBA_API_START] "
+            f"endpoint=CommonPlayerInfo "
+            f"player={player_name} "
+            f"player_id={player_id}"
+        )
 
         player_info_endpoint = (
             commonplayerinfo.CommonPlayerInfo(
@@ -423,14 +691,11 @@ def get_current_player_team(
             player_info_df,
             pd.DataFrame
         ):
-
             raise ValueError(
-                "CommonPlayerInfo did not return "
-                "a DataFrame"
+                "CommonPlayerInfo did not return a DataFrame"
             )
 
         if player_info_df.empty:
-
             raise ValueError(
                 "CommonPlayerInfo returned no rows"
             )
@@ -439,9 +704,8 @@ def get_current_player_team(
             "TEAM_ABBREVIATION"
             not in player_info_df.columns
         ):
-
             raise ValueError(
-                "CommonPlayerInfo result is missing "
+                "CommonPlayerInfo is missing "
                 "TEAM_ABBREVIATION"
             )
 
@@ -451,16 +715,13 @@ def get_current_player_team(
             ]
         ).strip().upper()
 
-        invalid_team_values = {
+        if current_team in {
             "",
             "NONE",
             "NAN",
             "NULL",
             "0"
-        }
-
-        if current_team in invalid_team_values:
-
+        }:
             raise ValueError(
                 "TEAM_ABBREVIATION is empty"
             )
@@ -474,8 +735,10 @@ def get_current_player_team(
         )
 
         print(
-            f"Current team refreshed: "
-            f"{player_name} -> {current_team}"
+            f"[NBA_API_SUCCESS] "
+            f"endpoint=CommonPlayerInfo "
+            f"player={player_name} "
+            f"value={current_team}"
         )
 
         return current_team
@@ -483,30 +746,16 @@ def get_current_player_team(
     except Exception as error:
 
         print(
-            f"WARNING: Could not refresh current team "
-            f"for {player_name}"
+            f"[NBA_API_FAILURE] "
+            f"endpoint=CommonPlayerInfo "
+            f"player={player_name} "
+            f"error={type(error).__name__}: {error}"
         )
-
-        print(
-            f"{type(error).__name__}: "
-            f"{error}"
-        )
-
-        if cached_team is not None:
-
-            print(
-                f"Using cached current team: "
-                f"{player_name} -> {cached_team}"
-            )
-
-            return cached_team
 
         raise RuntimeError(
-            f"無法取得 {player_name} 的目前球隊，"
-            "而且 Cache 中沒有可用的 current_team。"
-            "請再次按下 Load，讓程式重新嘗試 NBA API。"
+            f"{player_name} 沒有可用 current_team cache，"
+            f"且 NBA API 查詢失敗。"
         ) from error
-
 
 # ============================================================
 # 8. CHECK WHETHER A SEASON EXISTS IN CACHE
@@ -540,8 +789,23 @@ def has_valid_cached_season(
 def download_player_season(
     player_id,
     season,
+    player_name=None,
     timeout=60
 ):
+
+    player_label = (
+        player_name
+        if player_name
+        else str(player_id)
+    )
+
+    print(
+        f"[NBA_API_START] "
+        f"endpoint=PlayerGameLog "
+        f"player={player_label} "
+        f"player_id={player_id} "
+        f"season={season}"
+    )
 
     try:
 
@@ -561,17 +825,25 @@ def download_player_season(
             df_season,
             pd.DataFrame
         ):
-
             print(
-                f"    Invalid API response: "
-                f"{season}"
+                f"[NBA_API_FAILURE] "
+                f"endpoint=PlayerGameLog "
+                f"player={player_label} "
+                f"season={season} "
+                f"error=InvalidDataFrame"
             )
-
             return False, None
 
         df_season = df_season.copy()
-
         df_season["Season"] = season
+
+        print(
+            f"[NBA_API_SUCCESS] "
+            f"endpoint=PlayerGameLog "
+            f"player={player_label} "
+            f"season={season} "
+            f"rows={len(df_season)}"
+        )
 
         return True, df_season
 
@@ -583,12 +855,11 @@ def download_player_season(
     ) as error:
 
         print(
-            f"    TIMEOUT: {season}"
-        )
-
-        print(
-            f"    {type(error).__name__}: "
-            f"{error}"
+            f"[NBA_API_FAILURE] "
+            f"endpoint=PlayerGameLog "
+            f"player={player_label} "
+            f"season={season} "
+            f"error={type(error).__name__}: {error}"
         )
 
         return False, None
@@ -596,16 +867,14 @@ def download_player_season(
     except Exception as error:
 
         print(
-            f"    API ERROR: {season}"
-        )
-
-        print(
-            f"    {type(error).__name__}: "
-            f"{error}"
+            f"[NBA_API_FAILURE] "
+            f"endpoint=PlayerGameLog "
+            f"player={player_label} "
+            f"season={season} "
+            f"error={type(error).__name__}: {error}"
         )
 
         return False, None
-
 
 # ============================================================
 # 10. LOAD ONE HISTORICAL SEASON
@@ -654,6 +923,7 @@ def load_historical_season(
     success, downloaded_df = (
         download_player_season(
             player_id=player_id,
+            player_name=player_name,
             season=season,
             timeout=timeout
         )

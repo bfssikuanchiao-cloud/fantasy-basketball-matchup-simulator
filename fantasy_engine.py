@@ -13,7 +13,7 @@ import matplotlib.pyplot as plt
 import seaborn as sns
 from nba_api.stats.endpoints.commonallplayers import CommonAllPlayers
 from nba_api.stats.static import players
-from nba_api.stats.static import players
+
 from nba_api.stats.endpoints import (
     playergamelog,
     commonplayerinfo,
@@ -130,7 +130,7 @@ def find_player(name):
     )
 
     all_players = players.get_players()
-
+    match_source = "local"
     # ========================================================
     # 1. NORMALIZED EXACT MATCH
     # ========================================================
@@ -204,9 +204,82 @@ def find_player(name):
 
         elif not partial_matches:
 
-            raise ValueError(
-                f"找不到球員：{name}"
+            print(
+                f"[FALLBACK] "
+                f"Trying CommonAllPlayers for "
+                f"{input_name}"
             )
+        
+            try:
+        
+                current_players = (
+                    get_current_players()
+                )
+        
+                current_players = (
+                    current_players.copy()
+                )
+        
+                current_players[
+                    "normalized_name"
+                ] = (
+                    current_players[
+                        "DISPLAY_FIRST_LAST"
+                    ]
+                    .apply(
+                        normalize_player_name
+                    )
+                )
+        
+                fallback_matches = (
+                    current_players[
+                        current_players[
+                            "normalized_name"
+                        ]
+                        == normalized_input
+                    ]
+                )
+        
+                if len(fallback_matches) == 1:
+                    match_source = "CommonAllPlayers"
+                    row = fallback_matches.iloc[0]
+        
+                    matched_player = {
+                        "id": int(
+                            row["PERSON_ID"]
+                        ),
+                        "full_name": str(
+                            row[
+                                "DISPLAY_FIRST_LAST"
+                            ]
+                        ).strip(),
+                        "is_active": True
+                    }
+        
+                    print(
+                        f"[FALLBACK_SUCCESS] "
+                        f"{matched_player['full_name']} "
+                        f"(NBA ID: {matched_player['id']})"
+                    )
+        
+                else:
+        
+                    raise ValueError(
+                        f"找不到球員：{name}"
+                    )
+        
+            except Exception as error:
+
+                print(
+                    f"[FALLBACK_FAILURE] "
+                    f"player={input_name} "
+                    f"error={type(error).__name__}: {error}"
+                )
+            
+                raise ValueError(
+                    f"本地球員名單找不到球員：{name}；"
+                    "CommonAllPlayers fallback 亦查詢失敗。"
+                ) from error
 
         else:
 
@@ -233,9 +306,10 @@ def find_player(name):
     ).strip()
 
     print(
-        f"Matched locally: "
-        f"{official_name} "
-        f"(NBA ID: {player_id})"
+        f"[PLAYER_MATCH] "
+        f"source={match_source} "
+        f"player={official_name} "
+        f"player_id={player_id}"
     )
 
     return {
@@ -544,12 +618,19 @@ def save_player_cache(
 # Raise an error instead of using an old historical team.
 # ============================================================
 
+
 def get_current_player_team(
     player_id,
     player_name,
     cache,
     timeout=60
 ):
+
+    print(
+        f"[TEAM_LOOKUP] "
+        f"player={player_name} "
+        f"player_id={player_id}"
+    )
 
     cached_team = cache.get(
         "current_team"
@@ -570,18 +651,28 @@ def get_current_player_team(
         }:
 
             print(
-                f"Current team loaded from cache: "
-                f"{player_name} -> {cached_team}"
+                f"[CACHE_HIT] "
+                f"field=current_team "
+                f"player={player_name} "
+                f"value={cached_team}"
             )
 
             return cached_team
 
     print(
-        f"Current team cache missing: "
-        f"{player_name}"
+        f"[CACHE_MISS] "
+        f"field=current_team "
+        f"player={player_name}"
     )
 
     try:
+
+        print(
+            f"[NBA_API_START] "
+            f"endpoint=CommonPlayerInfo "
+            f"player={player_name} "
+            f"player_id={player_id}"
+        )
 
         player_info_endpoint = (
             commonplayerinfo.CommonPlayerInfo(
@@ -596,10 +687,26 @@ def get_current_player_team(
             .get_data_frame()
         )
 
-        if player_info_df.empty:
+        if not isinstance(
+            player_info_df,
+            pd.DataFrame
+        ):
+            raise ValueError(
+                "CommonPlayerInfo did not return a DataFrame"
+            )
 
+        if player_info_df.empty:
             raise ValueError(
                 "CommonPlayerInfo returned no rows"
+            )
+
+        if (
+            "TEAM_ABBREVIATION"
+            not in player_info_df.columns
+        ):
+            raise ValueError(
+                "CommonPlayerInfo is missing "
+                "TEAM_ABBREVIATION"
             )
 
         current_team = str(
@@ -607,6 +714,17 @@ def get_current_player_team(
                 "TEAM_ABBREVIATION"
             ]
         ).strip().upper()
+
+        if current_team in {
+            "",
+            "NONE",
+            "NAN",
+            "NULL",
+            "0"
+        }:
+            raise ValueError(
+                "TEAM_ABBREVIATION is empty"
+            )
 
         cache["current_team"] = current_team
 
@@ -617,8 +735,10 @@ def get_current_player_team(
         )
 
         print(
-            f"Current team refreshed: "
-            f"{player_name} -> {current_team}"
+            f"[NBA_API_SUCCESS] "
+            f"endpoint=CommonPlayerInfo "
+            f"player={player_name} "
+            f"value={current_team}"
         )
 
         return current_team
@@ -626,13 +746,10 @@ def get_current_player_team(
     except Exception as error:
 
         print(
-            f"WARNING: Could not obtain current team "
-            f"for {player_name}"
-        )
-
-        print(
-            f"{type(error).__name__}: "
-            f"{error}"
+            f"[NBA_API_FAILURE] "
+            f"endpoint=CommonPlayerInfo "
+            f"player={player_name} "
+            f"error={type(error).__name__}: {error}"
         )
 
         raise RuntimeError(
@@ -672,8 +789,23 @@ def has_valid_cached_season(
 def download_player_season(
     player_id,
     season,
+    player_name=None,
     timeout=60
 ):
+
+    player_label = (
+        player_name
+        if player_name
+        else str(player_id)
+    )
+
+    print(
+        f"[NBA_API_START] "
+        f"endpoint=PlayerGameLog "
+        f"player={player_label} "
+        f"player_id={player_id} "
+        f"season={season}"
+    )
 
     try:
 
@@ -693,17 +825,25 @@ def download_player_season(
             df_season,
             pd.DataFrame
         ):
-
             print(
-                f"    Invalid API response: "
-                f"{season}"
+                f"[NBA_API_FAILURE] "
+                f"endpoint=PlayerGameLog "
+                f"player={player_label} "
+                f"season={season} "
+                f"error=InvalidDataFrame"
             )
-
             return False, None
 
         df_season = df_season.copy()
-
         df_season["Season"] = season
+
+        print(
+            f"[NBA_API_SUCCESS] "
+            f"endpoint=PlayerGameLog "
+            f"player={player_label} "
+            f"season={season} "
+            f"rows={len(df_season)}"
+        )
 
         return True, df_season
 
@@ -715,12 +855,11 @@ def download_player_season(
     ) as error:
 
         print(
-            f"    TIMEOUT: {season}"
-        )
-
-        print(
-            f"    {type(error).__name__}: "
-            f"{error}"
+            f"[NBA_API_FAILURE] "
+            f"endpoint=PlayerGameLog "
+            f"player={player_label} "
+            f"season={season} "
+            f"error={type(error).__name__}: {error}"
         )
 
         return False, None
@@ -728,16 +867,14 @@ def download_player_season(
     except Exception as error:
 
         print(
-            f"    API ERROR: {season}"
-        )
-
-        print(
-            f"    {type(error).__name__}: "
-            f"{error}"
+            f"[NBA_API_FAILURE] "
+            f"endpoint=PlayerGameLog "
+            f"player={player_label} "
+            f"season={season} "
+            f"error={type(error).__name__}: {error}"
         )
 
         return False, None
-
 
 # ============================================================
 # 10. LOAD ONE HISTORICAL SEASON
@@ -786,6 +923,7 @@ def load_historical_season(
     success, downloaded_df = (
         download_player_season(
             player_id=player_id,
+            player_name=player_name,
             season=season,
             timeout=timeout
         )
