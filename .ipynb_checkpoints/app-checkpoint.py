@@ -2,7 +2,7 @@ from pathlib import Path
 import re
 import pandas as pd
 import streamlit as st
-
+import json
 import matplotlib.pyplot as plt
 import matplotlib.ticker as mtick
 import seaborn as sns
@@ -410,7 +410,73 @@ with sim_col:
 
 st.markdown("### 當前各項累積數據")
 st.caption("FG% 與 FT% 不直接輸入百分比，請輸入 FGM、FGA、FTM、FTA。")
-stat_columns = ["Pts", "Reb", "Ast", "Stl", "Blk", "3PM", "TO", "FGM", "FGA", "FTM", "FTA"]
+stat_columns = ["FGM", "FGA", "FTM", "FTA", "3PM", "Pts", "Reb", "Ast", "Stl", "Blk", "TO"]
+
+
+# ========================================================
+# SAVE / LOAD / RESET MATCHUP
+# ========================================================
+
+save_col, load_col, reset_col = st.columns(3)
+
+# ---------- SAVE ----------
+with save_col:
+
+    matchup_data = {
+        "current_my": {
+            stat: st.session_state.get(f"current_my_{stat}", 0)
+            for stat in stat_columns
+        },
+        "current_opp": {
+            stat: st.session_state.get(f"current_opp_{stat}", 0)
+            for stat in stat_columns
+        }
+    }
+
+    st.download_button(
+        "💾 Save Matchup",
+        data=json.dumps(matchup_data, indent=4),
+        file_name="matchup_snapshot.json",
+        mime="application/json"
+    )
+
+# ---------- LOAD ----------
+with load_col:
+
+    uploaded_matchup = st.file_uploader(
+        "📂 Load",
+        type=["json"],
+        key="matchup_loader"
+    )
+    
+    if uploaded_matchup is not None:
+    
+        if st.button("Load Snapshot"):
+    
+            loaded = json.load(uploaded_matchup)
+    
+            for stat, value in loaded["current_my"].items():
+                st.session_state[f"current_my_{stat}"] = value
+    
+            for stat, value in loaded["current_opp"].items():
+                st.session_state[f"current_opp_{stat}"] = value
+    
+            st.success("Matchup loaded successfully.")
+
+
+# ---------- RESET ----------
+with reset_col:
+
+    if st.button("🗑 Reset Matchup"):
+
+        for stat in stat_columns:
+
+            st.session_state[f"current_my_{stat}"] = 0
+            st.session_state[f"current_opp_{stat}"] = 0
+
+        st.rerun()
+
+
 my_totals_col, opp_totals_col = st.columns(2)
 
 with my_totals_col:

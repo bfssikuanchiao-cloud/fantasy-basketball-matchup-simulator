@@ -2810,6 +2810,29 @@ def create_add_drop_heatmap(
         category_comparison.copy()
     )
 
+    category_order = [
+        "FG%",
+        "FT%",
+        "3PM",
+        "Pts",
+        "Reb",
+        "Ast",
+        "Stl",
+        "Blk",
+        "TO",
+    ]
+    
+    comparison_df["Category"] = pd.Categorical(
+        comparison_df["Category"],
+        categories=category_order,
+        ordered=True,
+    )
+    
+    comparison_df = (
+        comparison_df
+        .sort_values("Category")
+        .reset_index(drop=True)
+    )
     required_columns = [
         "Category",
         "Baseline",
@@ -2912,24 +2935,24 @@ def create_add_drop_heatmap(
         "FGA",
         "FTM",
         "FTA",
+        "3PM",
         "Pts",
         "Reb",
         "Ast",
         "Stl",
         "Blk",
-        "3PM",
         "TO"
     ]
 
     contribution_categories = [
         "FG%",
         "FT%",
+        "3PM",
         "Pts",
         "Reb",
         "Ast",
         "Stl",
         "Blk",
-        "3PM",
         "TO"
     ]
 
