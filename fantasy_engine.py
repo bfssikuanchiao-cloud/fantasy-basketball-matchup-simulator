@@ -1,6 +1,7 @@
 # Imports
 
 import pickle
+import json
 import re
 from pathlib import Path
 import numpy as np
@@ -11,13 +12,7 @@ import unicodedata
 
 import matplotlib.pyplot as plt
 import seaborn as sns
-from nba_api.stats.endpoints.commonallplayers import CommonAllPlayers
-from nba_api.stats.static import players
 
-from nba_api.stats.endpoints import (
-    playergamelog,
-    commonplayerinfo,
-)
 
 
 # ============================================================
@@ -64,1437 +59,1036 @@ STAT_COLS = [
 ]
 
 # ============================================================
-# PLAYER CACHE SETTINGS
+# YAHOO DATA SOURCE
 # ============================================================
+import os
+import xml.etree.ElementTree as ET
+from datetime import date, timedelta
+from urllib.parse import quote
 
-CACHE_DIR = (
-    Path(__file__).resolve().parent
-    / "player_cache"
+YAHOO_BASE = "https://fantasysports.yahooapis.com/fantasy/v2"
+YAHOO_NS = {"f": "http://fantasysports.yahooapis.com/fantasy/v2/base.rng"}
+YAHOO_STAT_IDS = {
+    "3": "FGA", "4": "FGM", "6": "FTA", "7": "FTM",
+    "10": "3PM", "12": "Pts", "15": "Reb", "16": "Ast",
+    "17": "Stl", "18": "Blk", "19": "TO",
+}
+SCHEDULE_CACHE_PATH = Path(__file__).resolve().parent / "nba_schedule_2018_2027.csv"
+YAHOO_DAILY_CACHE_DIR = Path(__file__).resolve().parent / "yahoo_daily_cache"
+YAHOO_DAILY_CACHE_DIR.mkdir(parents=True, exist_ok=True)
+YAHOO_GAME_KEY_CACHE_PATH = (
+    Path(__file__).resolve().parent / "yahoo_nba_game_keys.json"
+)
+YAHOO_PLAYER_KEY_CACHE_PATH = (
+    Path(__file__).resolve().parent / "yahoo_player_keys.json"
 )
 
-CACHE_DIR.mkdir(
-    parents=True,
-    exist_ok=True
-)
 
 
-# ============================================================
-# 1. FIND PLAYERS
-# ============================================================
-
-def normalize_player_name(name):
-
-    normalized = unicodedata.normalize(
-        "NFKD",
-        str(name)
-    )
-
-    normalized = "".join(
-        character
-        for character in normalized
-        if not unicodedata.combining(character)
-    )
-
-    normalized = normalized.casefold()
-
-    normalized = re.sub(
-        r"[^a-z0-9]+",
-        " ",
-        normalized
-    )
-
-    return " ".join(
-        normalized.split()
-    )
+def _local_name(tag):
+    return str(tag).split("}")[-1]
 
 
-@st.cache_data
-def get_current_players():
-    return CommonAllPlayers(
-        is_only_current_season=1
-    ).get_data_frames()[0]
+def _child_text(element, name, default=None):
+    if element is None:
+        return default
+    for child in list(element):
+        if _local_name(child.tag) == name:
+            value = child.text
+            return value.strip() if value else default
+    return default
 
-def find_player(name):
 
-    input_name = str(
-        name
-    ).strip()
+def _descendants(element, name):
+    if element is None:
+        return []
+    return [node for node in element.iter() if _local_name(node.tag) == name]
 
-    if not input_name:
-        raise ValueError(
-            "球員名字不可為空白"
-        )
 
-    normalized_input = normalize_player_name(
-        input_name
-    )
+def _safe_number(value):
+    if value in (None, "", "-", "--"):
+        return 0
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return 0
 
-    all_players = players.get_players()
-    match_source = "local"
-    # ========================================================
-    # 1. NORMALIZED EXACT MATCH
-    # ========================================================
-    exact_matches = [
-        player
-        for player in all_players
-        if normalize_player_name(
-            player.get(
-                "full_name",
-                ""
-            )
-        ) == normalized_input
-    ]
 
-    active_exact_matches = [
-        player
-        for player in exact_matches
-        if player.get(
-            "is_active",
-            False
-        )
-    ]
+def _get_yahoo_app_credentials():
+    key = os.getenv("YAHOO_CONSUMER_KEY")
+    secret = os.getenv("YAHOO_CONSUMER_SECRET")
+    try:
+        key = key or st.secrets.get("YAHOO_CONSUMER_KEY")
+        secret = secret or st.secrets.get("YAHOO_CONSUMER_SECRET")
+    except Exception:
+        pass
+    if not key or not secret:
+        raise RuntimeError("Missing YAHOO_CONSUMER_KEY / YAHOO_CONSUMER_SECRET.")
+    return key, secret
 
-    if len(active_exact_matches) == 1:
 
-        matched_player = (
-            active_exact_matches[0]
-        )
+def get_yahoo_authorization_url():
+    key, _ = _get_yahoo_app_credentials()
+    return requests.Request("GET", "https://api.login.yahoo.com/oauth2/request_auth", params={
+        "client_id": key, "redirect_uri": "oob", "response_type": "code", "language": "en-us"
+    }).prepare().url
 
-    elif len(exact_matches) == 1:
 
-        matched_player = exact_matches[0]
+def exchange_yahoo_verifier(verifier_code):
+    code = str(verifier_code or "").strip()
+    if not code:
+        raise ValueError("Yahoo Verify Code 不可為空白。")
+    key, secret = _get_yahoo_app_credentials()
+    r = requests.post("https://api.login.yahoo.com/oauth2/get_token", auth=(key, secret),
+        data={"grant_type": "authorization_code", "redirect_uri": "oob", "code": code}, timeout=60)
+    if r.status_code != 200:
+        raise RuntimeError(f"Yahoo token exchange HTTP {r.status_code}: {r.text[:500]}")
+    token = r.json(); token["token_time"] = pd.Timestamp.utcnow().timestamp()
+    return token
 
-    else:
 
-        # ====================================================
-        # 2. NORMALIZED PARTIAL MATCH
-        # ====================================================
-        partial_matches = [
-            player
-            for player in all_players
-            if normalized_input
-            in normalize_player_name(
-                player.get(
-                    "full_name",
-                    ""
-                )
-            )
-        ]
+def refresh_yahoo_token(token):
+    key, secret = _get_yahoo_app_credentials()
+    old_refresh = token.get("refresh_token")
+    if not old_refresh:
+        raise RuntimeError("Yahoo token 缺少 refresh_token，請重新授權。")
+    r = requests.post("https://api.login.yahoo.com/oauth2/get_token", auth=(key, secret),
+        data={"grant_type": "refresh_token", "redirect_uri": "oob", "refresh_token": old_refresh}, timeout=60)
+    if r.status_code != 200:
+        raise RuntimeError(f"Yahoo token refresh HTTP {r.status_code}: {r.text[:500]}")
+    refreshed = r.json(); refreshed["refresh_token"] = refreshed.get("refresh_token") or old_refresh
+    refreshed["token_time"] = pd.Timestamp.utcnow().timestamp()
+    token.clear(); token.update(refreshed)
 
-        active_partial_matches = [
-            player
-            for player in partial_matches
-            if player.get(
-                "is_active",
-                False
-            )
-        ]
 
-        if len(active_partial_matches) == 1:
+def _yahoo_get_xml(path, params=None, timeout=60):
+    token = st.session_state.get("yahoo_token")
+    if not isinstance(token, dict) or not token.get("access_token"):
+        raise RuntimeError("Yahoo 尚未完成網頁授權。")
+    now = pd.Timestamp.utcnow().timestamp()
+    if now >= float(token.get("token_time", 0)) + float(token.get("expires_in", 3600)) - 120:
+        refresh_yahoo_token(token)
+    def send():
+        return requests.get(f"{YAHOO_BASE}/{path.lstrip('/')}", params=params,
+            headers={"Authorization": f"Bearer {token['access_token']}"}, timeout=timeout)
+    response = send()
+    if response.status_code == 401:
+        refresh_yahoo_token(token); response = send()
+    if response.status_code != 200:
+        raise RuntimeError(f"Yahoo API HTTP {response.status_code}: {response.text[:500]}")
+    return ET.fromstring(response.text)
 
-            matched_player = (
-                active_partial_matches[0]
-            )
-
-        elif len(partial_matches) == 1:
-
-            matched_player = (
-                partial_matches[0]
-            )
-
-        elif not partial_matches:
-
-            print(
-                f"[FALLBACK] "
-                f"Trying CommonAllPlayers for "
-                f"{input_name}"
-            )
-        
-            try:
-        
-                current_players = (
-                    get_current_players()
-                )
-        
-                current_players = (
-                    current_players.copy()
-                )
-        
-                current_players[
-                    "normalized_name"
-                ] = (
-                    current_players[
-                        "DISPLAY_FIRST_LAST"
-                    ]
-                    .apply(
-                        normalize_player_name
-                    )
-                )
-        
-                fallback_matches = (
-                    current_players[
-                        current_players[
-                            "normalized_name"
-                        ]
-                        == normalized_input
-                    ]
-                )
-        
-                if len(fallback_matches) == 1:
-                    match_source = "CommonAllPlayers"
-                    row = fallback_matches.iloc[0]
-        
-                    matched_player = {
-                        "id": int(
-                            row["PERSON_ID"]
-                        ),
-                        "full_name": str(
-                            row[
-                                "DISPLAY_FIRST_LAST"
-                            ]
-                        ).strip(),
-                        "is_active": True
-                    }
-        
-                    print(
-                        f"[FALLBACK_SUCCESS] "
-                        f"{matched_player['full_name']} "
-                        f"(NBA ID: {matched_player['id']})"
-                    )
-        
-                else:
-        
-                    raise ValueError(
-                        f"找不到球員：{name}"
-                    )
-        
-            except Exception as error:
-
-                print(
-                    f"[FALLBACK_FAILURE] "
-                    f"player={input_name} "
-                    f"error={type(error).__name__}: {error}"
-                )
-            
-                raise ValueError(
-                    f"本地球員名單找不到球員：{name}；"
-                    "CommonAllPlayers fallback 亦查詢失敗。"
-                ) from error
-
-        else:
-
-            matching_names = [
-                player.get(
-                    "full_name",
-                    ""
-                )
-                for player in partial_matches
-            ]
-
-            raise ValueError(
-                f"找到多位符合 '{name}' 的球員："
-                f"{matching_names}。"
-                "請輸入更完整的球員名字。"
-            )
-
-    player_id = int(
-        matched_player["id"]
-    )
-
-    official_name = str(
-        matched_player["full_name"]
-    ).strip()
-
-    print(
-        f"[PLAYER_MATCH] "
-        f"source={match_source} "
-        f"player={official_name} "
-        f"player_id={player_id}"
-    )
+def _extract_player(player_element):
+    eligible_positions = []
+    eligible_node = next(iter(_descendants(player_element, "eligible_positions")), None)
+    if eligible_node is not None:
+        for position_node in _descendants(eligible_node, "position"):
+            value = (position_node.text or "").strip()
+            if value and value not in eligible_positions:
+                eligible_positions.append(value)
 
     return {
-        "id": player_id,
-        "full_name": official_name,
-        "is_active": bool(
-            matched_player.get(
-                "is_active",
-                False
-            )
-        )
+        "player_key": _child_text(player_element, "player_key"),
+        "player_id": _child_text(player_element, "player_id"),
+        "name": _child_text(
+            next(iter(_descendants(player_element, "name")), None),
+            "full",
+        ),
+        "team": _child_text(player_element, "editorial_team_abbr"),
+        "status": _child_text(player_element, "status"),
+        "selected_position": _child_text(
+            next(iter(_descendants(player_element, "selected_position")), None),
+            "position",
+        ),
+        "eligible_positions": eligible_positions,
     }
 
 
-# ============================================================
-# 2. SAFE CACHE FILE NAME
-# ============================================================
-
-def make_safe_cache_name(
-    player_id,
-    player_name
-):
-
-    safe_name = re.sub(
-        r"[^a-zA-Z0-9_-]+",
-        "_",
-        player_name.strip().lower()
+def get_my_yahoo_team_key(game_key, league_key=None):
+    """Return the signed-in user's team key for the requested league."""
+    root = _yahoo_get_xml(
+        f"users;use_login=1/games;game_keys={game_key}/teams"
     )
+    team_keys = [
+        _child_text(team, "team_key")
+        for team in _descendants(root, "team")
+    ]
+    team_keys = [value for value in team_keys if value]
 
-    safe_name = safe_name.strip("_")
-
-    return (
-        f"{player_id}_"
-        f"{safe_name}.pkl"
-    )
-
-
-# ============================================================
-# 3. GET PLAYER CACHE PATH
-# ============================================================
-
-def get_player_cache_path(
-    player_id,
-    player_name
-):
-
-    expected_file_name = (
-        make_safe_cache_name(
-            player_id=player_id,
-            player_name=player_name
+    if league_key:
+        league_prefix = f"{league_key}.t."
+        league_team_keys = [
+            key for key in team_keys
+            if str(key).startswith(league_prefix)
+        ]
+        if len(league_team_keys) == 1:
+            print(
+                f"[YAHOO_MY_TEAM] league={league_key} | "
+                f"team={league_team_keys[0]}"
+            )
+            return league_team_keys[0]
+        if len(league_team_keys) > 1:
+            raise RuntimeError(
+                f"Multiple signed-in teams found for league {league_key}: "
+                f"{league_team_keys}"
+            )
+        raise RuntimeError(
+            f"Signed-in Yahoo account has no team in league {league_key}. "
+            f"Returned team keys: {team_keys}"
         )
+
+    if not team_keys:
+        raise RuntimeError(f"No Yahoo team found for game key {game_key}")
+    return team_keys[0]
+
+def get_yahoo_league_context(league_key):
+    """Return current Yahoo matchup, rosters and accumulated weekly stats."""
+    game_key = str(league_key).split(".")[0]
+    my_team_key = get_my_yahoo_team_key(game_key, league_key=league_key)
+
+    league_root = _yahoo_get_xml(f"league/{league_key}")
+    current_week = _child_text(
+        next(iter(_descendants(league_root, "league")), None),
+        "current_week",
+    )
+    if not current_week:
+        raise RuntimeError("Yahoo league response did not contain current_week")
+
+    scoreboard = _yahoo_get_xml(
+        f"league/{league_key}/scoreboard;week={current_week}"
     )
 
-    expected_path = (
-        CACHE_DIR
-        / expected_file_name
-    )
+    def extract_team_stats(team_element):
+        """Extract Yahoo weekly matchup totals into engine raw-stat fields."""
+        values = {}
+        if team_element is None:
+            return values
 
-    # ========================================================
-    # 1. USE THE EXPECTED CACHE FILE WHEN IT EXISTS
-    # ========================================================
-    if expected_path.exists():
+        team_stats_nodes = _descendants(team_element, "team_stats")
+        search_root = team_stats_nodes[0] if team_stats_nodes else team_element
 
-        return expected_path
+        for stat in _descendants(search_root, "stat"):
+            stat_id = _child_text(stat, "stat_id")
+            value = _child_text(stat, "value")
 
-    # ========================================================
-    # 2. FALLBACK: SEARCH BY NBA PLAYER ID
-    #
-    # Examples:
-    # 1631217_moussa_diabat.pkl
-    # 1631217_moussa_diabate.pkl
-    #
-    # Both are accepted because the NBA ID is the stable key.
-    # ========================================================
-    matching_paths = sorted(
-        CACHE_DIR.glob(
-            f"{int(player_id)}_*.pkl"
-        )
-    )
+            # Yahoo weekly composite stats confirmed from the live response:
+            # 9004003 = FGM/FGA, for example 150/307
+            # 9007006 = FTM/FTA, for example 58/67
+            if stat_id == "9004003" and value and "/" in str(value):
+                made, attempted = str(value).split("/", 1)
+                values["FGM"] = _safe_number(made.strip())
+                values["FGA"] = _safe_number(attempted.strip())
+                continue
 
-    if len(matching_paths) == 1:
+            if stat_id == "9007006" and value and "/" in str(value):
+                made, attempted = str(value).split("/", 1)
+                values["FTM"] = _safe_number(made.strip())
+                values["FTA"] = _safe_number(attempted.strip())
+                continue
 
-        matched_path = matching_paths[0]
+            # Normal scoring categories. stat_id 5 and 8 are percentages and
+            # are intentionally not used for the raw FGM/FGA/FTM/FTA totals.
+            if stat_id in YAHOO_STAT_IDS and value is not None:
+                values[YAHOO_STAT_IDS[stat_id]] = _safe_number(value)
 
         print(
-            f"Cache matched by player ID: "
-            f"{player_name} -> "
-            f"{matched_path.name}"
+            "[YAHOO_WEEK_PARSED] "
+            + " | ".join(f"{key}={value}" for key, value in values.items())
         )
+        return values
 
-        return matched_path
+    opponent_team_key = None
+    my_scoreboard_team = None
+    opp_scoreboard_team = None
 
-    if len(matching_paths) > 1:
-
-        matching_names = [
-            path.name
-            for path in matching_paths
+    for matchup in _descendants(scoreboard, "matchup"):
+        matchup_teams = _descendants(matchup, "team")
+        keyed_teams = [
+            (_child_text(team, "team_key"), team)
+            for team in matchup_teams
+            if _child_text(team, "team_key")
         ]
+        matchup_team_keys = [key for key, _ in keyed_teams]
 
+        if my_team_key in matchup_team_keys:
+            my_scoreboard_team = next(
+                team for key, team in keyed_teams if key == my_team_key
+            )
+            others = [
+                (key, team) for key, team in keyed_teams
+                if key != my_team_key
+            ]
+            if others:
+                opponent_team_key, opp_scoreboard_team = others[0]
+            break
+
+    if not opponent_team_key:
+        scoreboard_matchups = []
+        for matchup_node in _descendants(scoreboard, "matchup"):
+            keys = [
+                _child_text(team, "team_key")
+                for team in _descendants(matchup_node, "team")
+                if _child_text(team, "team_key")
+            ]
+            if keys:
+                scoreboard_matchups.append(keys)
         raise RuntimeError(
-            f"{player_name} 的 NBA ID "
-            f"{player_id} 找到多個 Cache："
-            f"{matching_names}。"
-            "請保留正確的單一 pkl 檔案。"
+            "Could not identify the current Yahoo matchup opponent. "
+            f"my_team_key={my_team_key}; "
+            f"scoreboard_matchups={scoreboard_matchups}"
         )
 
-    # ========================================================
-    # 3. NO CACHE EXISTS
-    #
-    # Return the expected path so save_player_cache() can
-    # create a new file at the standard location.
-    # ========================================================
-    return expected_path
-# ============================================================
-# 4. CREATE EMPTY PLAYER CACHE
-# ============================================================
+    def load_roster(team_key):
+        root = _yahoo_get_xml(f"team/{team_key}/roster")
+        players_out = []
+        for player in _descendants(root, "player"):
+            item = _extract_player(player)
+            if item["player_key"] and item["name"]:
+                players_out.append(item)
+        return players_out
 
-def create_empty_player_cache(
-    player_id,
-    player_name
-):
+    def load_week_stats(team_key, scoreboard_team):
+        # Always inspect both Yahoo sources. Scoreboard contains the visible
+        # matchup categories; team weekly stats can contain richer display data.
+        scoreboard_values = extract_team_stats(scoreboard_team)
+
+        team_root = _yahoo_get_xml(
+            f"team/{team_key}/stats;type=week;week={current_week}"
+        )
+        team_nodes = _descendants(team_root, "team")
+        team_values = extract_team_stats(
+            team_nodes[0] if team_nodes else team_root
+        )
+
+        values = dict(scoreboard_values)
+        values.update(team_values)
+
+        required_fields = list(YAHOO_STAT_IDS.values())
+        missing_fields = [
+            field for field in required_fields
+            if field not in values
+        ]
+        if missing_fields:
+            print(
+                f"[YAHOO_WEEK_WARNING] team={team_key} | "
+                f"missing={missing_fields}"
+            )
+
+        complete = {
+            field: int(round(values.get(field, 0)))
+            for field in required_fields
+        }
+        print(
+            f"[YAHOO_WEEK_STATS] team={team_key} | week={current_week} | "
+            + " | ".join(f"{key}={value}" for key, value in complete.items())
+        )
+        return complete
+
+    current_my = load_week_stats(my_team_key, my_scoreboard_team)
+    current_opp = load_week_stats(opponent_team_key, opp_scoreboard_team)
 
     return {
-        "player_id": player_id,
-        "player_name": player_name,
-        "current_team": None,
-        "seasons": {}
+        "league_key": league_key,
+        "game_key": game_key,
+        "current_week": int(current_week),
+        "my_team_key": my_team_key,
+        "opponent_team_key": opponent_team_key,
+        "my_roster": load_roster(my_team_key),
+        "opponent_roster": load_roster(opponent_team_key),
+        "current_my": current_my,
+        "current_opp": current_opp,
     }
 
+def _season_start_year(season):
+    return str(season).split("-")[0]
 
-# ============================================================
-# 5. LOAD PLAYER CACHE
-# ============================================================
 
-def load_player_cache(
-    player_id,
-    player_name
-):
-
-    cache_path = get_player_cache_path(
-        player_id=player_id,
-        player_name=player_name
-    )
-
-    empty_cache = create_empty_player_cache(
-        player_id=player_id,
-        player_name=player_name
-    )
-
-    if not cache_path.exists():
-
-        print(
-            f"Cache not found: "
-            f"{player_name}"
-        )
-
-        return empty_cache
-
-    try:
-
-        with open(
-            cache_path,
-            "rb"
-        ) as file:
-
-            cache = pickle.load(file)
-
-        if not isinstance(
-            cache,
-            dict
-        ):
-
-            print(
-                f"WARNING: Invalid cache format "
-                f"for {player_name}."
+def get_yahoo_nba_game_keys(seasons=SEASONS, current_league_key=None):
+    """Resolve Yahoo NBA game_key for every requested fantasy season."""
+    requested = [str(season) for season in seasons]
+    cached = {}
+    if YAHOO_GAME_KEY_CACHE_PATH.exists():
+        try:
+            cached = json.loads(
+                YAHOO_GAME_KEY_CACHE_PATH.read_text(encoding="utf-8")
             )
+        except Exception:
+            cached = {}
 
-            return empty_cache
+    # Current league key is authoritative for the active season.
+    if current_league_key:
+        cached[CURRENT_SEASON] = str(current_league_key).split(".")[0]
 
-        if "seasons" not in cache:
-
-            cache["seasons"] = {}
-
-        if not isinstance(
-            cache["seasons"],
-            dict
-        ):
-
-            cache["seasons"] = {}
-
-        if "current_team" not in cache:
-
-            cache["current_team"] = None
-
-        cache["player_id"] = player_id
-        cache["player_name"] = player_name
-
-        print(
-            f"Cache loaded: "
-            f"{player_name}"
+    missing = [season for season in requested if not cached.get(season)]
+    if missing:
+        years = ",".join(_season_start_year(season) for season in missing)
+        print(f"[YAHOO_GAME_KEYS] resolving NBA seasons: {', '.join(missing)}")
+        root = _yahoo_get_xml(
+            f"games;game_codes=nba;seasons={years}"
         )
-
-        return cache
-
-    except Exception as error:
-
-        print(
-            f"WARNING: Could not read cache "
-            f"for {player_name}"
-        )
-
-        print(
-            f"{type(error).__name__}: "
-            f"{error}"
-        )
-
-        return empty_cache
-
-
-# ============================================================
-# 6. SAVE PLAYER CACHE
-# ============================================================
-
-def save_player_cache(
-    player_id,
-    player_name,
-    cache
-):
-
-    cache_path = get_player_cache_path(
-        player_id=player_id,
-        player_name=player_name
-    )
-
-    temp_path = cache_path.with_suffix(
-        ".tmp"
-    )
-
-    cache["player_id"] = player_id
-    cache["player_name"] = player_name
-
-    if "current_team" not in cache:
-
-        cache["current_team"] = None
-
-    if "seasons" not in cache:
-
-        cache["seasons"] = {}
-
-    try:
-
-        with open(
-            temp_path,
-            "wb"
-        ) as file:
-
-            pickle.dump(
-                cache,
-                file,
-                protocol=pickle.HIGHEST_PROTOCOL
-            )
-
-        temp_path.replace(
-            cache_path
-        )
-
-    except Exception as error:
-
-        print(
-            f"WARNING: Could not save cache "
-            f"for {player_name}"
-        )
-
-        print(
-            f"{type(error).__name__}: "
-            f"{error}"
-        )
-
-        if temp_path.exists():
-
-            try:
-
-                temp_path.unlink()
-
-            except Exception:
-
-                pass
-
-
-# ============================================================
-# 7. GET CURRENT PLAYER TEAM
-#
-# Current team source:
-# CommonPlayerInfo.TEAM_ABBREVIATION
-#
-# Every roster load:
-# Try to refresh current team from the NBA API.
-#
-# Success:
-# Update current_team in the player cache.
-#
-# Timeout / API error:
-# Use the last successfully cached current_team.
-#
-# No API result and no cached team:
-# Raise an error instead of using an old historical team.
-# ============================================================
-
-
-def get_current_player_team(
-    player_id,
-    player_name,
-    cache,
-    timeout=60
-):
-
-    print(
-        f"[TEAM_LOOKUP] "
-        f"player={player_name} "
-        f"player_id={player_id}"
-    )
-
-    cached_team = cache.get(
-        "current_team"
-    )
-
-    if cached_team is not None:
-
-        cached_team = str(
-            cached_team
-        ).strip().upper()
-
-        if cached_team not in {
-            "",
-            "NONE",
-            "NAN",
-            "NULL",
-            "0"
-        }:
-
-            print(
-                f"[CACHE_HIT] "
-                f"field=current_team "
-                f"player={player_name} "
-                f"value={cached_team}"
-            )
-
-            return cached_team
-
-    print(
-        f"[CACHE_MISS] "
-        f"field=current_team "
-        f"player={player_name}"
-    )
-
-    try:
-
-        print(
-            f"[NBA_API_START] "
-            f"endpoint=CommonPlayerInfo "
-            f"player={player_name} "
-            f"player_id={player_id}"
-        )
-
-        player_info_endpoint = (
-            commonplayerinfo.CommonPlayerInfo(
-                player_id=player_id,
-                timeout=timeout
-            )
-        )
-
-        player_info_df = (
-            player_info_endpoint
-            .common_player_info
-            .get_data_frame()
-        )
-
-        if not isinstance(
-            player_info_df,
-            pd.DataFrame
-        ):
-            raise ValueError(
-                "CommonPlayerInfo did not return a DataFrame"
-            )
-
-        if player_info_df.empty:
-            raise ValueError(
-                "CommonPlayerInfo returned no rows"
-            )
-
-        if (
-            "TEAM_ABBREVIATION"
-            not in player_info_df.columns
-        ):
-            raise ValueError(
-                "CommonPlayerInfo is missing "
-                "TEAM_ABBREVIATION"
-            )
-
-        current_team = str(
-            player_info_df.iloc[0][
-                "TEAM_ABBREVIATION"
+        for game in _descendants(root, "game"):
+            code = _child_text(game, "code")
+            game_key = _child_text(game, "game_key")
+            yahoo_season = _child_text(game, "season")
+            if code != "nba" or not game_key or not yahoo_season:
+                continue
+            matching = [
+                season for season in requested
+                if _season_start_year(season) == str(yahoo_season)
             ]
-        ).strip().upper()
+            for season in matching:
+                cached[season] = game_key
+                print(f"[YAHOO_GAME_KEYS] {season} -> {game_key}")
 
-        if current_team in {
-            "",
-            "NONE",
-            "NAN",
-            "NULL",
-            "0"
-        }:
-            raise ValueError(
-                "TEAM_ABBREVIATION is empty"
-            )
-
-        cache["current_team"] = current_team
-
-        save_player_cache(
-            player_id=player_id,
-            player_name=player_name,
-            cache=cache
-        )
-
-        print(
-            f"[NBA_API_SUCCESS] "
-            f"endpoint=CommonPlayerInfo "
-            f"player={player_name} "
-            f"value={current_team}"
-        )
-
-        return current_team
-
-    except Exception as error:
-
-        print(
-            f"[NBA_API_FAILURE] "
-            f"endpoint=CommonPlayerInfo "
-            f"player={player_name} "
-            f"error={type(error).__name__}: {error}"
-        )
-
+    unresolved = [season for season in requested if not cached.get(season)]
+    if unresolved:
         raise RuntimeError(
-            f"{player_name} 沒有可用 current_team cache，"
-            f"且 NBA API 查詢失敗。"
-        ) from error
+            "Yahoo game_key 未能解析的球季：" + ", ".join(unresolved)
+        )
 
-# ============================================================
-# 8. CHECK WHETHER A SEASON EXISTS IN CACHE
-# ============================================================
-
-def has_valid_cached_season(
-    cache,
-    season
-):
-
-    if "seasons" not in cache:
-
-        return False
-
-    if season not in cache["seasons"]:
-
-        return False
-
-    cached_df = cache["seasons"][season]
-
-    return isinstance(
-        cached_df,
-        pd.DataFrame
+    YAHOO_GAME_KEY_CACHE_PATH.write_text(
+        json.dumps(cached, indent=2, ensure_ascii=False),
+        encoding="utf-8",
     )
+    return {season: cached[season] for season in requested}
 
 
-# ============================================================
-# 9. DOWNLOAD ONE PLAYER SEASON
-# ============================================================
+def _exact_player_from_root(root, player_name):
+    target = normalize_player_name(player_name)
+    candidates = []
+    for player in _descendants(root, "player"):
+        item = _extract_player(player)
+        if item.get("player_key") and item.get("name"):
+            candidates.append(item)
 
-def download_player_season(
-    player_id,
-    season,
-    player_name=None,
-    timeout=60
-):
-
-    player_label = (
-        player_name
-        if player_name
-        else str(player_id)
-    )
-
-    print(
-        f"[NBA_API_START] "
-        f"endpoint=PlayerGameLog "
-        f"player={player_label} "
-        f"player_id={player_id} "
-        f"season={season}"
-    )
-
-    try:
-
-        df_season = (
-            playergamelog.PlayerGameLog(
-                player_id=player_id,
-                season=season,
-                season_type_all_star=(
-                    "Regular Season"
-                ),
-                timeout=timeout
-            )
-            .get_data_frames()[0]
-        )
-
-        if not isinstance(
-            df_season,
-            pd.DataFrame
-        ):
-            print(
-                f"[NBA_API_FAILURE] "
-                f"endpoint=PlayerGameLog "
-                f"player={player_label} "
-                f"season={season} "
-                f"error=InvalidDataFrame"
-            )
-            return False, None
-
-        df_season = df_season.copy()
-        df_season["Season"] = season
-
-        print(
-            f"[NBA_API_SUCCESS] "
-            f"endpoint=PlayerGameLog "
-            f"player={player_label} "
-            f"season={season} "
-            f"rows={len(df_season)}"
-        )
-
-        return True, df_season
-
-    except (
-        requests.exceptions.ReadTimeout,
-        requests.exceptions.ConnectTimeout,
-        requests.exceptions.ConnectionError,
-        TimeoutError
-    ) as error:
-
-        print(
-            f"[NBA_API_FAILURE] "
-            f"endpoint=PlayerGameLog "
-            f"player={player_label} "
-            f"season={season} "
-            f"error={type(error).__name__}: {error}"
-        )
-
-        return False, None
-
-    except Exception as error:
-
-        print(
-            f"[NBA_API_FAILURE] "
-            f"endpoint=PlayerGameLog "
-            f"player={player_label} "
-            f"season={season} "
-            f"error={type(error).__name__}: {error}"
-        )
-
-        return False, None
-
-# ============================================================
-# 10. LOAD ONE HISTORICAL SEASON
-#
-# Completed season:
-#
-# Cache exists:
-# Use cache.
-#
-# Cache missing:
-# Download from API.
-#
-# Download succeeds:
-# Save immediately.
-#
-# Download fails:
-# Do not create that season in cache.
-# Retry on the next Load.
-# ============================================================
-
-def load_historical_season(
-    player_id,
-    player_name,
-    season,
-    cache,
-    timeout=60
-):
-
-    if has_valid_cached_season(
-        cache=cache,
-        season=season
-    ):
-
-        cached_df = (
-            cache["seasons"][season]
-            .copy()
-        )
-
-        print(
-            f"    Cache: "
-            f"{len(cached_df)} games"
-        )
-
-        return cached_df
-
-    success, downloaded_df = (
-        download_player_season(
-            player_id=player_id,
-            player_name=player_name,
-            season=season,
-            timeout=timeout
-        )
-    )
-
-    if not success:
-
-        print(
-            f"    Not cached. "
-            f"Will retry {season} "
-            f"on next Load."
-        )
-
-        return None
-
-    cache["seasons"][season] = (
-        downloaded_df.copy()
-    )
-
-    save_player_cache(
-        player_id=player_id,
-        player_name=player_name,
-        cache=cache
-    )
-
-    if downloaded_df.empty:
-
-        print(
-            f"    Downloaded and cached "
-            f"empty season: {season}"
-        )
-
-    else:
-
-        print(
-            f"    Downloaded and cached: "
-            f"{len(downloaded_df)} games"
-        )
-
-    return downloaded_df.copy()
-
-
-# ============================================================
-# 11. UPDATE CURRENT SEASON
-#
-# Current season:
-#
-# Every Load:
-# Try API again.
-#
-# Download succeeds:
-# Replace cached current season.
-#
-# Download fails:
-# Use previous cached current season.
-#
-# No previous current-season cache:
-# Return None and retry on the next Load.
-# ============================================================
-
-def update_current_season(
-    player_id,
-    player_name,
-    season,
-    cache,
-    timeout=60
-):
-
-    success, downloaded_df = (
-        download_player_season(
-            player_id=player_id,
-            season=season,
-            timeout=timeout
-        )
-    )
-
-    if success:
-
-        cache["seasons"][season] = (
-            downloaded_df.copy()
-        )
-
-        save_player_cache(
-            player_id=player_id,
-            player_name=player_name,
-            cache=cache
-        )
-
-        if downloaded_df.empty:
-
-            print(
-                f"    Updated current season: "
-                f"No games found"
-            )
-
-        else:
-
-            print(
-                f"    Updated current season: "
-                f"{len(downloaded_df)} games"
-            )
-
-        return downloaded_df.copy()
-
-    if has_valid_cached_season(
-        cache=cache,
-        season=season
-    ):
-
-        cached_df = (
-            cache["seasons"][season]
-            .copy()
-        )
-
-        print(
-            "    Current-season update failed."
-        )
-
-        print(
-            f"    Using cached {season}: "
-            f"{len(cached_df)} games"
-        )
-
-        return cached_df
-
-    print(
-        f"    Current-season update failed "
-        f"and no cache exists: {season}"
-    )
-
-    print(
-        f"    Will retry {season} "
-        f"on next Load."
-    )
-
+    exact = [
+        item for item in candidates
+        if normalize_player_name(item["name"]) == target
+    ]
+    if len(exact) == 1:
+        return exact[0]
     return None
 
 
-# ============================================================
-# 12. NORMALIZE PLAYER GAME LOG
-#
-# IMPORTANT:
-#
-# Team parsed here is the historical team for each game.
-# It is not used as the player's current team.
-#
-# The current team is stored separately in:
-# df.attrs["current_team"]
-# ============================================================
+def _load_yahoo_player_key_cache():
+    if not YAHOO_PLAYER_KEY_CACHE_PATH.exists():
+        return {}
+    try:
+        data = json.loads(
+            YAHOO_PLAYER_KEY_CACHE_PATH.read_text(encoding="utf-8")
+        )
+        return data if isinstance(data, dict) else {}
+    except Exception as error:
+        print(
+            f"[YAHOO_PLAYER_KEY_CACHE] read failed | "
+            f"error={type(error).__name__}: {error}"
+        )
+        return {}
 
-def normalize_player_game_log(
-    df,
-    player_name
+
+def _save_yahoo_player_key_cache(cache):
+    temp_path = YAHOO_PLAYER_KEY_CACHE_PATH.with_suffix(".tmp")
+    temp_path.write_text(
+        json.dumps(cache, indent=2, ensure_ascii=False),
+        encoding="utf-8",
+    )
+    temp_path.replace(YAHOO_PLAYER_KEY_CACHE_PATH)
+
+
+def _player_cache_identity(player_name):
+    return normalize_player_name(player_name)
+
+
+def find_yahoo_player(
+    player_name,
+    game_key,
+    season,
+    current_roster_player=None,
 ):
+    """
+    Resolve season-specific Yahoo player metadata.
 
-    if df.empty:
+    Rules:
+    - Current season may use the roster player_key as a shortcut.
+    - Historical seasons search directly by name inside that season.
+    - There is no full-collection/page-scanning fallback.
+    - A successful result or NOT_FOUND is cached by player + season.
+    """
+    cache = _load_yahoo_player_key_cache()
+    identity = _player_cache_identity(player_name)
+    player_cache = cache.setdefault(identity, {})
+    cached_value = player_cache.get(season, "__MISSING__")
 
-        return df
+    if cached_value is None:
+        # A previous Yahoo search failure must not permanently suppress a
+        # season that really exists. Remove stale negative cache and retry.
+        print(
+            f"[YAHOO_PLAYER_KEY] {player_name} | {season} | "
+            "STALE NOT_FOUND CACHE -> RETRY"
+        )
+        player_cache.pop(season, None)
+        _save_yahoo_player_key_cache(cache)
 
-    df = df.copy()
+    if isinstance(cached_value, dict) and cached_value.get("player_key"):
+        print(
+            f"[YAHOO_PLAYER_KEY] {player_name} | {season} | "
+            f"CACHE HIT -> {cached_value['player_key']}"
+        )
+        return cached_value
 
-    rename_map = {
-        "GAME_DATE": "Date",
-        "MATCHUP": "Matchup",
-        "PTS": "Pts",
-        "REB": "Reb",
-        "AST": "Ast",
-        "STL": "Stl",
-        "BLK": "Blk",
-        "FG3M": "3PM",
-        "TOV": "TO",
-        "FGM": "FGM",
-        "FGA": "FGA",
-        "FTM": "FTM",
-        "FTA": "FTA"
-    }
+    # Only the current season may use the roster key directly.
+    if season == CURRENT_SEASON and current_roster_player:
+        roster_item = dict(current_roster_player)
+        roster_key = roster_item.get("player_key")
+        roster_name = roster_item.get("name")
+        if (
+            roster_key
+            and roster_name
+            and normalize_player_name(roster_name)
+            == normalize_player_name(player_name)
+        ):
+            player_cache[season] = roster_item
+            _save_yahoo_player_key_cache(cache)
+            print(
+                f"[YAHOO_PLAYER_KEY] {player_name} | {season} | "
+                f"CURRENT ROSTER -> {roster_key}"
+            )
+            return roster_item
 
-    df = df.rename(
-        columns=rename_map
-    )
+    # Historical seasons always resolve name -> player_key within that game.
+    search_terms = [str(player_name).strip()]
+    last_name = str(player_name).strip().split()[-1]
+    if last_name and last_name not in search_terms:
+        search_terms.append(last_name)
 
-    required_columns = [
-        "Date",
-        "Matchup",
-        "Pts",
-        "Reb",
-        "Ast",
-        "Stl",
-        "Blk",
-        "3PM",
-        "TO",
-        "FGM",
-        "FGA",
-        "FTM",
-        "FTA",
-        "Season"
-    ]
+    for term in search_terms:
+        encoded = quote(term, safe="")
+        try:
+            root = _yahoo_get_xml(
+                f"game/{game_key}/players;search={encoded}"
+            )
+        except Exception as error:
+            print(
+                f"[YAHOO_PLAYER_KEY] search failed | "
+                f"player={player_name} season={season} term={term} | "
+                f"error={type(error).__name__}: {error}"
+            )
+            continue
 
-    missing_columns = [
-        column
-        for column in required_columns
-        if column not in df.columns
-    ]
-
-    if missing_columns:
-
-        raise ValueError(
-            f"{player_name} 缺少必要欄位："
-            f"{missing_columns}"
+        returned_names = []
+        for returned_node in _descendants(root, "player"):
+            returned_item = _extract_player(returned_node)
+            if returned_item.get("name"):
+                returned_names.append(returned_item["name"])
+        print(
+            f"[YAHOO_PLAYER_SEARCH] {player_name} | {season} | "
+            f"term={term!r} | returned={len(returned_names)} | "
+            f"sample={returned_names[:5]}"
         )
 
-    df["Date"] = pd.to_datetime(
-        df["Date"],
-        errors="coerce"
+        exact = _exact_player_from_root(root, player_name)
+        if exact:
+            player_cache[season] = exact
+            _save_yahoo_player_key_cache(cache)
+            print(
+                f"[YAHOO_PLAYER_KEY] {player_name} | {season} | "
+                f"NAME SEARCH -> {exact['player_key']}"
+            )
+            return exact
+
+    # Do not cache NOT_FOUND. A transient Yahoo filtering/response problem
+    # must not permanently turn an actual historical season into zero games.
+    print(
+        f"[YAHOO_PLAYER_KEY] {player_name} | {season} | "
+        "NOT FOUND THIS RUN -> SKIP (NOT CACHED)"
+    )
+    return None
+
+
+def _season_date_bounds(season):
+    start_year = int(str(season).split("-")[0])
+    return date(start_year, 10, 1), date(start_year + 1, 6, 30)
+
+
+def load_schedule_context():
+    if not SCHEDULE_CACHE_PATH.exists():
+        raise FileNotFoundError(f"Missing schedule cache: {SCHEDULE_CACHE_PATH}")
+    schedule = pd.read_csv(SCHEDULE_CACHE_PATH, dtype={"GAME_ID": str})
+    schedule["DATE"] = pd.to_datetime(schedule["DATE"], errors="coerce")
+    schedule["TEAM"] = schedule["TEAM"].astype(str).str.upper().str.strip()
+    if schedule.duplicated(["DATE", "TEAM"]).any():
+        raise ValueError("Schedule cache DATE + TEAM is not unique")
+    return schedule
+
+
+def _fetch_yahoo_daily(player_key, game_date, timeout=60):
+    date_text = pd.Timestamp(game_date).strftime("%Y-%m-%d")
+    root = _yahoo_get_xml(
+        f"player/{player_key}/stats;type=date;date={date_text}",
+        timeout=timeout,
+    )
+    player_nodes = _descendants(root, "player")
+    if not player_nodes:
+        return None
+    player = player_nodes[0]
+    team = _child_text(player, "editorial_team_abbr")
+    values = {}
+    for stat in _descendants(player, "stat"):
+        stat_id = _child_text(stat, "stat_id")
+        value = _child_text(stat, "value")
+        if stat_id in YAHOO_STAT_IDS:
+            values[YAHOO_STAT_IDS[stat_id]] = _safe_number(value)
+    if not team or not any(values.values()):
+        return None
+    return {"Date": pd.Timestamp(game_date), "Team": team.upper(), **values}
+
+
+def download_yahoo_player_season(
+    player_name,
+    game_key,
+    season,
+    timeout=60,
+    roster_player=None,
+):
+    """
+    Build one Yahoo season with trade-safe date discovery.
+
+    Historical seasons deliberately use unique NBA calendar dates rather than
+    filtering by player metadata team. Yahoo's editorial team can represent a
+    later/current team and is not reliable for deciding historical game dates.
+
+    Successful game rows are checkpointed immediately. A separate checked-date
+    file records both game and no-game dates, so interrupted runs resume without
+    repeating completed requests.
+    """
+    player = find_yahoo_player(
+        player_name=player_name,
+        game_key=game_key,
+        season=season,
+        current_roster_player=roster_player,
+    )
+    if player is None:
+        return None, None
+
+    print(
+        f"[YAHOO_PLAYER_KEY] {player_name} | {season} | "
+        f"game_key={game_key} | player_key={player['player_key']}"
     )
 
-    def parse_matchup(matchup):
+    safe_key = str(player["player_key"]).replace(".", "_")
+    cache_path = YAHOO_DAILY_CACHE_DIR / f"{safe_key}_{season}.csv"
+    checked_path = (
+        YAHOO_DAILY_CACHE_DIR
+        / f"{safe_key}_{season}_checked_dates.txt"
+    )
 
-        matchup = str(
-            matchup
-        ).strip()
+    if cache_path.exists():
+        cached = pd.read_csv(cache_path)
+        cached["Date"] = pd.to_datetime(cached["Date"], errors="coerce")
+        cached = cached.dropna(subset=["Date"])
+    else:
+        cached = pd.DataFrame()
 
-        if " vs. " in matchup:
+    checked_dates = set()
+    if checked_path.exists():
+        for line in checked_path.read_text(encoding="utf-8").splitlines():
+            line = line.strip()
+            if line:
+                parsed = pd.to_datetime(line, errors="coerce")
+                if not pd.isna(parsed):
+                    checked_dates.add(pd.Timestamp(parsed).normalize())
 
-            historical_team, opponent = (
-                matchup.split(
-                    " vs. ",
-                    maxsplit=1
-                )
+    # Backward compatibility: every previously cached game date is already
+    # checked even when it predates the checked-date sidecar file.
+    if not cached.empty:
+        checked_dates.update(
+            cached["Date"].dropna().dt.normalize().tolist()
+        )
+
+    start_date, season_end = _season_date_bounds(season)
+    end_date = min(season_end, date.today())
+    schedule = load_schedule_context()
+
+    date_mask = (
+        (schedule["DATE"].dt.date >= start_date)
+        & (schedule["DATE"].dt.date <= end_date)
+    )
+
+    # TRADE-SAFE: one request per unique NBA calendar date. Do not constrain
+    # the historical season to editorial_team_abbr/current team.
+    candidate_dates = sorted(
+        pd.to_datetime(
+            schedule.loc[date_mask, "DATE"], errors="coerce"
+        )
+        .dropna()
+        .dt.normalize()
+        .unique()
+    )
+
+    pending_dates = [
+        pd.Timestamp(value).normalize()
+        for value in candidate_dates
+        if pd.Timestamp(value).normalize() not in checked_dates
+    ]
+
+    print(
+        f"[YAHOO_DAILY] {player_name} | {season} | "
+        f"trade_safe_dates=yes | games_cached={len(cached)} | "
+        f"dates_checked={len(checked_dates)} | "
+        f"pending_dates={len(pending_dates)}"
+    )
+
+    def save_game_cache(frame):
+        if frame is None or frame.empty:
+            return
+        frame = frame.copy()
+        frame["Date"] = pd.to_datetime(frame["Date"], errors="coerce")
+        frame = (
+            frame.dropna(subset=["Date"])
+            .drop_duplicates(["Date"], keep="last")
+            .sort_values("Date", ascending=False)
+            .reset_index(drop=True)
+        )
+        temp_path = cache_path.with_suffix(".tmp")
+        frame.to_csv(temp_path, index=False, encoding="utf-8-sig")
+        temp_path.replace(cache_path)
+
+    def save_checked_dates(values):
+        temp_path = checked_path.with_suffix(".tmp")
+        text = "\n".join(
+            sorted(pd.Timestamp(value).strftime("%Y-%m-%d") for value in values)
+        )
+        if text:
+            text += "\n"
+        temp_path.write_text(text, encoding="utf-8")
+        temp_path.replace(checked_path)
+
+    combined = cached.copy()
+    total = len(pending_dates)
+
+    for index, timestamp in enumerate(pending_dates, start=1):
+        print(
+            f"[YAHOO_DAILY] {player_name} | {season} | "
+            f"{index}/{total} | {timestamp:%Y-%m-%d}"
+        )
+
+        row = _fetch_yahoo_daily(
+            player["player_key"], timestamp, timeout=timeout
+        )
+
+        if row is not None:
+            combined = pd.concat(
+                [combined, pd.DataFrame([row])],
+                ignore_index=True,
+            )
+            save_game_cache(combined)
+            print(
+                f"[YAHOO_CHECKPOINT] {player_name} | {season} | "
+                f"{timestamp:%Y-%m-%d} | GAME SAVED | "
+                f"total_games={len(combined.drop_duplicates(['Date']))}"
             )
 
-            return pd.Series({
-                "Team": historical_team.strip(),
-                "Opp": opponent.strip(),
-                "HomeAway": "HOME",
-                "IsHome": True
-            })
+        # Only mark the date checked after the request completed normally.
+        # A timeout/exception exits before this point and is retried next run.
+        checked_dates.add(timestamp)
+        save_checked_dates(checked_dates)
 
-        if " @ " in matchup:
-
-            historical_team, opponent = (
-                matchup.split(
-                    " @ ",
-                    maxsplit=1
-                )
-            )
-
-            return pd.Series({
-                "Team": historical_team.strip(),
-                "Opp": opponent.strip(),
-                "HomeAway": "AWAY",
-                "IsHome": False
-            })
-
-        return pd.Series({
-            "Team": None,
-            "Opp": None,
-            "HomeAway": None,
-            "IsHome": None
-        })
-
-    matchup_columns = (
-        df["Matchup"]
-        .apply(parse_matchup)
-    )
-
-    for column in [
-        "Team",
-        "Opp",
-        "HomeAway",
-        "IsHome"
-    ]:
-
-        df[column] = (
-            matchup_columns[column]
+    if combined.empty:
+        print(
+            f"[YAHOO_SEASON_CACHE] {player_name} | {season} | games=0"
         )
+        return combined, player
 
-    numeric_columns = [
-        "Pts",
-        "Reb",
-        "Ast",
-        "Stl",
-        "Blk",
-        "3PM",
-        "TO",
-        "FGM",
-        "FGA",
-        "FTM",
-        "FTA"
+    combined["Date"] = pd.to_datetime(combined["Date"], errors="coerce")
+    combined = (
+        combined.dropna(subset=["Date"])
+        .drop_duplicates(["Date"], keep="last")
+        .sort_values("Date", ascending=False)
+        .reset_index(drop=True)
+    )
+    save_game_cache(combined)
+
+    print(
+        f"[YAHOO_SEASON_CACHE] {player_name} | {season} | "
+        f"games={len(combined)} | dates_checked={len(checked_dates)}"
+    )
+    return combined, player
+
+def normalize_yahoo_game_log(yahoo_df, season, player_name):
+    if yahoo_df is None or yahoo_df.empty:
+        return pd.DataFrame()
+    df = yahoo_df.copy()
+    df["Date"] = pd.to_datetime(df["Date"], errors="coerce")
+    df["Team"] = df["Team"].astype(str).str.upper().str.strip()
+    schedule = load_schedule_context()[
+        ["DATE", "TEAM", "OPP", "H_A", "IS_HOME"]
+    ].copy()
+    df = df.merge(
+        schedule,
+        left_on=["Date", "Team"],
+        right_on=["DATE", "TEAM"],
+        how="left",
+        validate="many_to_one",
+    )
+    missing = df["OPP"].isna()
+    if missing.any():
+        print(
+            f"[YAHOO_SCHEDULE_WARNING] {player_name} {season}: "
+            f"{int(missing.sum())} unmatched DATE + TEAM rows"
+        )
+    df["Opp"] = df["OPP"]
+    df["HomeAway"] = df["H_A"].map({"H": "HOME", "A": "AWAY"})
+    df["IsHome"] = df["IS_HOME"]
+    df["Season"] = season
+    for column in STAT_COLS:
+        if column not in df.columns:
+            df[column] = 0
+        df[column] = pd.to_numeric(df[column], errors="coerce").fillna(0)
+    keep = [
+        "Date", "Team", "Opp", "HomeAway", "IsHome",
+        "Pts", "Reb", "Ast", "Stl", "Blk", "3PM", "TO",
+        "FGM", "FGA", "FTM", "FTA", "Season",
     ]
-
-    for column in numeric_columns:
-
-        df[column] = pd.to_numeric(
-            df[column],
-            errors="coerce"
-        )
-
-    df = (
-        df
-        .dropna(
-            subset=[
-                "Date"
-            ]
-        )
-        .sort_values(
-            "Date",
-            ascending=False
-        )
-        .reset_index(
-            drop=True
-        )
+    return (
+        df[keep]
+        .dropna(subset=["Date"])
+        .sort_values("Date", ascending=False)
+        .reset_index(drop=True)
     )
 
-    return df
 
-
-# ============================================================
-# 13. GET MULTI-SEASON PLAYER GAME LOG
-# ============================================================
-
-def get_player_df_from_api(
+def get_player_df_from_yahoo(
     name,
+    league_key,
     seasons=SEASONS,
-    timeout=60
+    timeout=60,
+    roster_player=None,
 ):
-
-    player = find_player(
-        name
+    game_keys = get_yahoo_nba_game_keys(
+        seasons=seasons,
+        current_league_key=league_key,
     )
-
-    player_id = player["id"]
-
-    official_player_name = (
-        player["full_name"]
-    )
-
-    cache = load_player_cache(
-        player_id=player_id,
-        player_name=official_player_name
-    )
-
-    # ========================================================
-    # CURRENT TEAM
-    #
-    # This is refreshed before loading the game-log pool.
-    # It does not come from historical MATCHUP.
-    # ========================================================
-
-    current_team = get_current_player_team(
-        player_id=player_id,
-        player_name=official_player_name,
-        cache=cache,
-        timeout=timeout
-    )
-
-    season_dfs = []
-
-    print(
-        f"\nLoading historical pool "
-        f"for {name}"
-    )
-
-    print(
-        f"Current schedule team: "
-        f"{current_team}"
-    )
+    season_frames = []
+    identified = dict(roster_player) if roster_player is not None else None
 
     for season in seasons:
-
-        print(
-            f"  Loading {season}..."
+        season_game_key = game_keys[season]
+        raw, season_player = download_yahoo_player_season(
+            player_name=name,
+            game_key=season_game_key,
+            season=season,
+            timeout=timeout,
+            roster_player=roster_player,
         )
+
+        if season_player is None:
+            continue
 
         if season == CURRENT_SEASON:
+            identified = season_player
+        elif identified is None:
+            identified = season_player
 
-            df_season = (
-                update_current_season(
-                    player_id=player_id,
-                    player_name=official_player_name,
-                    season=season,
-                    cache=cache,
-                    timeout=timeout
-                )
-            )
+        normalized = normalize_yahoo_game_log(raw, season, name)
+        if not normalized.empty:
+            season_frames.append(normalized)
 
-        else:
-
-            df_season = (
-                load_historical_season(
-                    player_id=player_id,
-                    player_name=official_player_name,
-                    season=season,
-                    cache=cache,
-                    timeout=timeout
-                )
-            )
-
-        if df_season is None:
-
-            continue
-
-        if df_season.empty:
-
-            continue
-
-        df_season = df_season.copy()
-
-        if "Season" not in df_season.columns:
-
-            df_season["Season"] = season
-
-        season_dfs.append(
-            df_season
-        )
-
-    if not season_dfs:
-
+    if not season_frames:
         print(
-            f"\nWARNING: No game data "
-            f"available for {name}"
+            f"[YAHOO_PLAYER] {name} | no seasons with game data"
         )
-
         return pd.DataFrame()
 
-    df = pd.concat(
-        season_dfs,
-        ignore_index=True
-    )
+    result = pd.concat(season_frames, ignore_index=True)
+    current_team = None
+    if roster_player is not None:
+        current_team = roster_player.get("team")
+    if not current_team and identified:
+        current_team = identified.get("team")
+    if not current_team and not result.empty:
+        current_team = result.iloc[0]["Team"]
 
-    df = normalize_player_game_log(
-        df=df,
-        player_name=name
-    )
+    result.attrs["player_id"] = identified.get("player_id") if identified else None
+    result.attrs["yahoo_player_key"] = identified.get("player_key") if identified else None
+    result.attrs["official_player_name"] = identified.get("name", name) if identified else name
+    result.attrs["current_team"] = current_team
+    result.attrs["current_team_source"] = "Yahoo current roster"
+    return result
 
-    # ========================================================
-    # STORE CURRENT TEAM AS DATAFRAME METADATA
-    #
-    # Historical Team column remains unchanged.
-    # Future schedule lookup must use this current_team attr.
-    # ========================================================
+def parse_yahoo_league_input(value):
+    """Accept public Yahoo URL, league ID, or API league key."""
+    text = str(value or "").strip()
+    if not text:
+        raise ValueError("請輸入 Yahoo League URL、League ID 或 API League Key。")
+    api_match = re.fullmatch(r"(\d+)\.l\.(\d+)", text)
+    if api_match:
+        return {"league_key": text, "league_id": api_match.group(2), "team_number": None}
+    url_match = re.search(r"basketball\.fantasysports\.yahoo\.com/nba/(\d+)(?:/(\d+))?", text)
+    if url_match:
+        return {"league_key": None, "league_id": url_match.group(1), "team_number": url_match.group(2)}
+    if re.fullmatch(r"\d+", text):
+        return {"league_key": None, "league_id": text, "team_number": None}
+    raise ValueError("無法辨識輸入。範例：1486、Yahoo league URL，或 478.l.621。")
 
-    df.attrs["player_id"] = player_id
 
-    df.attrs["official_player_name"] = (
-        official_player_name
-    )
-
-    df.attrs["current_team"] = (
-        current_team
-    )
-
-    df.attrs["current_team_source"] = (
-        "CommonPlayerInfo.TEAM_ABBREVIATION"
-    )
-
-    print(
-        f"\n{name}"
-    )
-
-    print(
-        f"Current team: "
-        f"{current_team}"
-    )
-
-    print(
-        f"Total historical games: "
-        f"{len(df)}"
-    )
-
-    season_counts = (
-        df["Season"]
-        .value_counts()
-        .reindex(seasons)
-        .fillna(0)
-        .astype(int)
-    )
-
-    print(
-        season_counts
-    )
-
-    missing_cache_seasons = [
-        season
-        for season in seasons
-        if (
-            season != CURRENT_SEASON
-            and not has_valid_cached_season(
-                cache=cache,
-                season=season
-            )
+def resolve_yahoo_league_key(value):
+    parsed = parse_yahoo_league_input(value)
+    if parsed["league_key"]:
+        return parsed
+    root = _yahoo_get_xml("users;use_login=1/games/leagues")
+    matches = []
+    for league in _descendants(root, "league"):
+        league_key = _child_text(league, "league_key")
+        league_id = _child_text(league, "league_id")
+        if league_key and league_id == parsed["league_id"]:
+            matches.append(league_key)
+    if not matches:
+        raise ValueError(
+            f"登入的 Yahoo 帳號找不到 League ID {parsed['league_id']}。"
         )
-    ]
-
-    if missing_cache_seasons:
-
-        print(
-            "\nHistorical seasons still "
-            "missing from cache:"
+    if len(matches) > 1:
+        raise ValueError(
+            f"League ID {parsed['league_id']} 對應到多個 Yahoo game。請輸入完整 API league key。"
         )
-
-        for season in missing_cache_seasons:
-
-            print(
-                f"  - {season}"
-            )
-
-        print(
-            "Press Load again to retry "
-            "the missing seasons."
-        )
-
-    else:
-
-        print(
-            "\nAll completed seasons are cached."
-        )
-
-    return df
+    parsed["league_key"] = matches[0]
+    return parsed
 
 
 # ============================================================
-# 13. BUILD ROSTER
+# PLAYER NAME NORMALIZATION
 # ============================================================
+def normalize_player_name(name):
+    normalized = unicodedata.normalize("NFKD", str(name))
+    normalized = "".join(
+        ch for ch in normalized if not unicodedata.combining(ch)
+    )
+    normalized = normalized.casefold()
+    normalized = re.sub(r"[^a-z0-9]+", " ", normalized)
+    return " ".join(normalized.split())
+
 
 def build_roster(
     player_names,
-    seasons=SEASONS
+    seasons=SEASONS,
+    league_key=None,
+    yahoo_players=None,
 ):
-
+    """Yahoo-only roster builder. Runtime NBA API access is forbidden."""
+    if not league_key:
+        raise RuntimeError(
+            "NBA API player loading is disabled. Load a Yahoo matchup first."
+        )
+    yahoo_by_name = {
+        normalize_player_name(p["name"]): p
+        for p in (yahoo_players or [])
+        if p.get("name")
+    }
     roster = {}
-
     for name in player_names:
-
-        print(
-            "\n" + "=" * 60
+        print("\n" + "=" * 60)
+        print(f"Loading Yahoo history: {name}")
+        print("=" * 60)
+        roster_player = yahoo_by_name.get(normalize_player_name(name))
+        if roster_player is None:
+            raise ValueError(f"{name}: Yahoo roster metadata / player_key not found")
+        df = get_player_df_from_yahoo(
+            name=name,
+            league_key=league_key,
+            seasons=seasons,
+            roster_player=roster_player,
         )
-
-        print(
-            f"Loading {name}"
-        )
-
-        print(
-            "=" * 60
-        )
-
-        player_df = (
-            get_player_df_from_api(
-                name=name,
-                seasons=seasons
-            )
-        )
-
-        if player_df.empty:
-
-            print(
-                f"WARNING: {name} "
-                f"DataFrame is empty"
-            )
-
-        roster[name] = player_df
-
+        if df.empty:
+            print(f"WARNING: {name} Yahoo DataFrame is empty")
+        roster[name] = df
     return roster
 
-# =====================================================
-# Schedule Functions
-# =====================================================
+def load_yahoo_matchup_context(league_input):
+    """Load only current matchup, rosters, statuses, and weekly totals."""
+    resolved = resolve_yahoo_league_key(league_input)
+    league_key = resolved["league_key"]
+    context = get_yahoo_league_context(league_key)
+    context["public_league_id"] = resolved["league_id"]
+    context["public_team_number"] = resolved["team_number"]
+    context["historical_loaded"] = False
+    print(
+        f"[YAHOO_MATCHUP_READY] league={league_key} | "
+        f"week={context['current_week']} | "
+        f"my_players={len(context['my_roster'])} | "
+        f"opp_players={len(context['opponent_roster'])}"
+    )
+    return context
 
-# ============================================================
-# 4. LOAD SCHEDULE
-# ============================================================
+
+def build_yahoo_historical_rosters(context, seasons=SEASONS):
+    """Build simulation-ready historical DataFrames from a loaded context."""
+    if not isinstance(context, dict):
+        raise ValueError("Yahoo matchup context is missing or invalid.")
+
+    required = {"league_key", "my_roster", "opponent_roster"}
+    missing = required - set(context)
+    if missing:
+        raise ValueError(
+            "Yahoo matchup context is missing: "
+            + ", ".join(sorted(missing))
+        )
+
+    league_key = context["league_key"]
+    my_players = list(context["my_roster"])
+    opponent_players = list(context["opponent_roster"])
+
+    injured_slots = {"IL", "IL+", "IR", "IR+"}
+    my_simulation_players = [
+        player for player in my_players
+        if str(player.get("selected_position") or "").strip().upper()
+        not in injured_slots
+    ]
+    opponent_simulation_players = [
+        player for player in opponent_players
+        if str(player.get("selected_position") or "").strip().upper()
+        not in injured_slots
+    ]
+
+    my_names = [player["name"] for player in my_simulation_players]
+    opponent_names = [player["name"] for player in opponent_simulation_players]
+
+    print(
+        f"[YAHOO_HISTORY_START] league={league_key} | "
+        f"seasons={len(seasons)} | my_players={len(my_names)} | "
+        f"opp_players={len(opponent_names)}"
+    )
+
+    my_roster_engine = build_roster(
+        my_names,
+        seasons=seasons,
+        league_key=league_key,
+        yahoo_players=my_simulation_players,
+    )
+    opponent_roster_engine = build_roster(
+        opponent_names,
+        seasons=seasons,
+        league_key=league_key,
+        yahoo_players=opponent_players,
+    )
+
+    print(
+        f"[YAHOO_HISTORY_READY] league={league_key} | "
+        f"my_players={len(my_roster_engine)} | "
+        f"opp_players={len(opponent_roster_engine)}"
+    )
+    return {
+        "my_roster_engine": my_roster_engine,
+        "opponent_roster_engine": opponent_roster_engine,
+    }
+
+
+def build_yahoo_matchup_rosters(league_input, seasons=SEASONS):
+    """Backward-compatible combined loader."""
+    context = load_yahoo_matchup_context(league_input)
+    historical = build_yahoo_historical_rosters(context, seasons=seasons)
+    combined = dict(context)
+    combined.update(historical)
+    combined["historical_loaded"] = True
+    return combined
 
 def load_schedule(
     path="schedule.csv"
@@ -1564,127 +1158,162 @@ def apply_single_game_weight(
     decay=DECAY,
     home_boost=HOME_BOOST,
     away_boost=AWAY_BOOST,
-    opp_boost=OPP_BOOST
+    opp_boost=OPP_BOOST,
 ):
-
+    """Apply recency x future home/away x future opponent sampling weights."""
     df = df.copy()
 
-    # --------------------------------------------------------
-    # NEW:
-    #
-    # 不論資料來自哪一季
-    # 全部按照真正 Date 排序
-    # --------------------------------------------------------
+    required = {"Date", "HomeAway", "Opp"}
+    missing = required - set(df.columns)
+    if missing:
+        raise ValueError(
+            "Weighting data is missing required columns: "
+            + ", ".join(sorted(missing))
+        )
+    if df.empty:
+        raise ValueError("Cannot calculate sampling weights from an empty DataFrame.")
 
     df = (
-        df
-        .sort_values(
-            "Date",
-            ascending=False
-        )
+        df.sort_values("Date", ascending=False)
         .reset_index(drop=True)
     )
 
-    # --------------------------------------------------------
-    # Recency Weight
-    #
-    # 最新一場 = decay^0
-    # 次新一場 = decay^1
-    # ...
-    # --------------------------------------------------------
+    future_home_away = str(game["home_away"]).strip().lower()
+    future_opp = str(game["opponent"]).strip().upper()
+    if future_home_away not in {"home", "away"}:
+        raise ValueError(
+            f"Unexpected future home_away={game['home_away']!r}; expected home/away."
+        )
 
-    df["Weight"] = (
-        decay **
-        np.arange(len(df))
-    )
+    hist_home_away = df["HomeAway"].astype(str).str.strip().str.upper()
+    hist_opp = df["Opp"].astype(str).str.strip().str.upper()
 
-    # --------------------------------------------------------
-    # Future Game Environment
-    # --------------------------------------------------------
-
-    next_is_home = (
-        game["home_away"] == "home"
-    )
-
-    next_opp = (
-        game["opponent"]
-    )
-
-    # --------------------------------------------------------
-    # Historical Game Environment
-    # --------------------------------------------------------
-
-    is_home_sample = (
-        df["HomeAway"] == "HOME"
-    )
-
-    is_away_sample = (
-        df["HomeAway"] == "AWAY"
-    )
-
-    # --------------------------------------------------------
-    # Home / Away Boost
-    # --------------------------------------------------------
-
-    if next_is_home:
-
-        df.loc[
-            is_home_sample,
-            "Weight"
-        ] *= home_boost
-
+    # Keep each component separate so the final sampling probability is auditable.
+    df["RecencyWeight"] = decay ** np.arange(len(df), dtype=float)
+    df["HomeAwayMultiplier"] = 1.0
+    if future_home_away == "home":
+        df.loc[hist_home_away.eq("HOME"), "HomeAwayMultiplier"] = home_boost
+        expected_ha_mask = hist_home_away.eq("HOME")
     else:
+        df.loc[hist_home_away.eq("AWAY"), "HomeAwayMultiplier"] = away_boost
+        expected_ha_mask = hist_home_away.eq("AWAY")
 
-        df.loc[
-            is_away_sample,
-            "Weight"
-        ] *= away_boost
+    df["OpponentMultiplier"] = 1.0
+    opp_mask = hist_opp.eq(future_opp)
+    df.loc[opp_mask, "OpponentMultiplier"] = opp_boost
+
+    df["RawWeight"] = (
+        df["RecencyWeight"]
+        * df["HomeAwayMultiplier"]
+        * df["OpponentMultiplier"]
+    )
+
+    raw_sum = float(df["RawWeight"].sum())
+    if not np.isfinite(raw_sum) or raw_sum <= 0:
+        raise ValueError(f"Invalid RawWeight sum: {raw_sum}")
+
+    df["Weight"] = df["RawWeight"] / raw_sum
 
     # --------------------------------------------------------
-    # Opponent Boost
+    # AUTOMATIC WEIGHT CHECKS
     # --------------------------------------------------------
+    checks = {
+        "normalized_sum": bool(np.isclose(df["Weight"].sum(), 1.0, atol=1e-12)),
+        "all_weights_finite": bool(np.isfinite(df["Weight"]).all()),
+        "all_weights_positive": bool((df["Weight"] > 0).all()),
+        "recency_formula": bool(np.allclose(
+            df["RecencyWeight"].to_numpy(dtype=float),
+            decay ** np.arange(len(df), dtype=float),
+        )),
+        "home_away_multiplier": bool(np.allclose(
+            df["HomeAwayMultiplier"].to_numpy(dtype=float),
+            np.where(
+                expected_ha_mask.to_numpy(),
+                home_boost if future_home_away == "home" else away_boost,
+                1.0,
+            ),
+        )),
+        "opponent_multiplier": bool(np.allclose(
+            df["OpponentMultiplier"].to_numpy(dtype=float),
+            np.where(opp_mask.to_numpy(), opp_boost, 1.0),
+        )),
+        "raw_weight_product": bool(np.allclose(
+            df["RawWeight"].to_numpy(dtype=float),
+            (
+                df["RecencyWeight"]
+                * df["HomeAwayMultiplier"]
+                * df["OpponentMultiplier"]
+            ).to_numpy(dtype=float),
+        )),
+    }
 
-    df.loc[
-        df["Opp"] == next_opp,
-        "Weight"
-    ] *= opp_boost
+    failed_checks = [name for name, passed in checks.items() if not passed]
+    if failed_checks:
+        raise AssertionError(
+            "Weight audit failed: " + ", ".join(failed_checks)
+        )
 
     # --------------------------------------------------------
-    # Normalize
+    # WEIGHT AUDIT TABLE
     # --------------------------------------------------------
-    print("\nWeight Summary Before Normalize")
+    audit_columns = [
+        "Date", "Team", "Opp", "HomeAway", "Season",
+        "RecencyWeight", "HomeAwayMultiplier", "OpponentMultiplier",
+        "RawWeight", "Weight",
+    ]
+    available_audit_columns = [
+        column for column in audit_columns if column in df.columns
+    ]
+    audit_table = df[available_audit_columns].copy()
+    audit_table = audit_table.rename(columns={"Weight": "NormalizedWeight"})
 
+    print("\n" + "=" * 92)
+    print("WEIGHT AUDIT")
+    print("=" * 92)
     print(
-        df.groupby("HomeAway")["Weight"]
-          .mean()
+        f"Future Game: date={game['date']} | opp={future_opp} | "
+        f"home_away={future_home_away.upper()}"
     )
-
-    df["Weight"] = (
-        df["Weight"]
-        /
-        df["Weight"].sum()
-    )
-
-    print("\n========== HOME/AWAY DEBUG ==========")
-
     print(
-        df["HomeAway"]
-        .value_counts(dropna=False)
+        f"Settings: DECAY={decay} | HOME_BOOST={home_boost} | "
+        f"AWAY_BOOST={away_boost} | OPP_BOOST={opp_boost}"
     )
-
     print(
-        "Home matches:",
-        (df["HomeAway"] == "HOME").sum()
+        f"Historical rows={len(df)} | matching H/A={int(expected_ha_mask.sum())} | "
+        f"matching opponent={int(opp_mask.sum())}"
     )
+    print("Automatic checks:")
+    for check_name, passed in checks.items():
+        print(f"  {check_name}: {'PASS' if passed else 'FAIL'}")
+    print(f"  normalized_weight_sum: {df['Weight'].sum():.12f}")
 
-    print(
-        "Away matches:",
-        (df["HomeAway"] == "AWAY").sum()
+    # Print the rows most useful for manual verification: highest final sampling
+    # probability, while preserving all component multipliers.
+    display_audit = (
+        audit_table.sort_values("NormalizedWeight", ascending=False)
+        .head(20)
+        .copy()
     )
+    numeric_cols = [
+        "RecencyWeight", "HomeAwayMultiplier", "OpponentMultiplier",
+        "RawWeight", "NormalizedWeight",
+    ]
+    for column in numeric_cols:
+        if column in display_audit.columns:
+            display_audit[column] = display_audit[column].astype(float).round(8)
+    print("\nTop 20 historical rows by sampling probability:")
+    print(display_audit.to_string(index=False))
+    print("=" * 92)
 
-
+    # Keep the audit table attached without changing the existing caller API.
+    df.attrs["weight_audit"] = audit_table
+    df.attrs["weight_checks"] = checks
+    df.attrs["future_game"] = {
+        "date": game["date"],
+        "opponent": future_opp,
+        "home_away": future_home_away,
+    }
     return df
-
 
 # ============================================================
 # 7. PREPARE PLAYER SIMULATION
@@ -2709,75 +2338,136 @@ def simulate_matchup_fast(
 # Add Player 也抓 Multi-Season Pool
 # ============================================================
 
+def identify_yahoo_add_player(player_name, league_key):
+    """
+    Resolve Add Player metadata from the selected Yahoo LEAGUE player pool.
+
+    Add/Drop candidates may be free agents or owned by another team, so they
+    are not present in either loaded matchup roster. Searching the current
+    game's generic players collection proved unreliable because Yahoo could
+    return an unfiltered first page. The league-scoped Players Collection is
+    the correct eligible-player scope for this Add Player workflow.
+    """
+    cleaned_name = " ".join(str(player_name or "").strip().split())
+    if not cleaned_name:
+        raise ValueError("Add Player 名稱不可為空白。")
+    if not league_key:
+        raise RuntimeError("缺少 Yahoo league_key，無法識別 Add Player。")
+
+    current_game_key = str(league_key).split(".")[0]
+    target = normalize_player_name(cleaned_name)
+    search_terms = [cleaned_name]
+    last_name = cleaned_name.split()[-1]
+    if last_name not in search_terms:
+        search_terms.append(last_name)
+
+    print(
+        f"[YAHOO_ADD_IDENTIFY] player={cleaned_name} | "
+        f"league_key={league_key} | game_key={current_game_key}"
+    )
+
+    # Search league scope first. It represents players eligible for this
+    # fantasy league and includes players outside the current matchup rosters.
+    search_scopes = [
+        ("LEAGUE", f"league/{league_key}/players"),
+        ("GAME_FALLBACK", f"game/{current_game_key}/players"),
+    ]
+
+    for scope_name, base_path in search_scopes:
+        for term in search_terms:
+            encoded = quote(term, safe="")
+            root = _yahoo_get_xml(f"{base_path};search={encoded}")
+
+            candidates = []
+            for player_node in _descendants(root, "player"):
+                item = _extract_player(player_node)
+                if item.get("player_key") and item.get("name"):
+                    candidates.append(item)
+
+            print(
+                f"[YAHOO_ADD_SEARCH] scope={scope_name} | "
+                f"term={term!r} | returned={len(candidates)} | "
+                f"sample={[item['name'] for item in candidates[:8]]}"
+            )
+
+            exact = [
+                item for item in candidates
+                if normalize_player_name(item["name"]) == target
+            ]
+            if len(exact) == 1:
+                metadata = exact[0]
+
+                # Persist current-season metadata so the normal historical
+                # loader takes exactly the same path as a roster player.
+                cache = _load_yahoo_player_key_cache()
+                identity = _player_cache_identity(metadata["name"])
+                cache.setdefault(identity, {})[CURRENT_SEASON] = metadata
+                _save_yahoo_player_key_cache(cache)
+
+                print(
+                    f"[YAHOO_ADD_IDENTIFIED] scope={scope_name} | "
+                    f"name={metadata.get('name')} | "
+                    f"player_key={metadata.get('player_key')} | "
+                    f"player_id={metadata.get('player_id')} | "
+                    f"team={metadata.get('team')} | "
+                    f"status={metadata.get('status')}"
+                )
+                return metadata
+
+            if len(exact) > 1:
+                raise ValueError(
+                    f"Yahoo 對 {cleaned_name} 回傳多個精確結果："
+                    f"{[item['player_key'] for item in exact]}"
+                )
+
+    raise ValueError(
+        f"Yahoo League {league_key} 找不到 {cleaned_name}。"
+        "已檢查 league player pool 與 current game player pool；"
+        "請查看 PowerShell 的 [YAHOO_ADD_SEARCH] 回傳名單。"
+    )
+
 def create_add_drop_roster(
     baseline_roster,
     drop_player,
     add_player,
-    seasons=SEASONS
+    league_key,
+    seasons=SEASONS,
 ):
-
+    """Yahoo-only Add/Drop with current-game identification before history."""
     if drop_player not in baseline_roster:
-
-        raise ValueError(
-            f"{drop_player} 不在目前 roster 裡"
-        )
-
+        raise ValueError(f"{drop_player} 不在目前 roster 裡")
     if add_player in baseline_roster:
+        raise ValueError(f"{add_player} 已經在目前 roster 裡")
+    if not league_key:
+        raise RuntimeError("Add Player 需要已連線的 Yahoo league context。")
 
+    add_metadata = identify_yahoo_add_player(
+        player_name=add_player,
+        league_key=league_key,
+    )
+    official_name = add_metadata.get("name") or add_player
+    add_df = get_player_df_from_yahoo(
+        name=official_name,
+        league_key=league_key,
+        seasons=seasons,
+        roster_player=add_metadata,
+    )
+    if add_df.empty:
         raise ValueError(
-            f"{add_player} 已經在目前 roster 裡"
+            f"Yahoo 已識別 {official_name} ({add_metadata.get('player_key')})，"
+            "但沒有取得任何歷史比賽資料。"
         )
 
-    print("\n" + "=" * 60)
-    print("CREATING ADD / DROP ROSTER")
-    print("=" * 60)
-
-    print(
-        f"DROP : {drop_player}"
-    )
-
-    print(
-        f"ADD  : {add_player}"
-    )
-
-    print(
-        f"\nLoading multi-season data for {add_player}..."
-    )
-
-    add_df = (
-        get_player_df_from_api(
-            add_player,
-            seasons=seasons
+    result = {}
+    for name, df in baseline_roster.items():
+        result[official_name if name == drop_player else name] = (
+            add_df if name == drop_player else df
         )
+    print(
+        f"[YAHOO_ADD_READY] player={official_name} | rows={len(add_df)} | "
+        f"current_team={add_df.attrs.get('current_team')}"
     )
-
-    scenario_roster = {}
-
-    for (
-        name,
-        df
-    ) in baseline_roster.items():
-
-        if name == drop_player:
-
-            scenario_roster[
-                add_player
-            ] = add_df
-
-        else:
-
-            scenario_roster[
-                name
-            ] = df
-
-    return scenario_roster
-
-
-
-# ============================================================
-# 13. CREATE ADD / DROP HEATMAP FIGURE
-# ============================================================
-
+    return result
 
 def create_add_drop_heatmap(
     category_comparison,
@@ -3475,7 +3165,8 @@ def compare_add_drop_fast(
     drop_player,
     seasons=SEASONS,
     n_sim=3000,
-    random_seed=12345
+    random_seed=12345,
+    yahoo_league_key=None
 ):
 
     # ========================================================
@@ -3489,7 +3180,8 @@ def compare_add_drop_fast(
                 baseline_roster=baseline_roster,
                 drop_player=drop_player,
                 add_player=add_player,
-                seasons=seasons
+                seasons=seasons,
+                league_key=yahoo_league_key,
             )
         )
 

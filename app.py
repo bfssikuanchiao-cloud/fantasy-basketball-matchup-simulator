@@ -2,12 +2,19 @@ from pathlib import Path
 import re
 import pandas as pd
 import streamlit as st
-import json
 import matplotlib.pyplot as plt
 import matplotlib.ticker as mtick
 import seaborn as sns
 
-from fantasy_engine import SEASONS, build_roster, load_schedule, compare_add_drop_fast
+from fantasy_engine import (
+    SEASONS,
+    load_yahoo_matchup_context,
+    build_yahoo_historical_rosters,
+    get_yahoo_authorization_url,
+    exchange_yahoo_verifier,
+    load_schedule,
+    compare_add_drop_fast,
+)
 
 # ============================================================
 # PAGE SETTINGS
@@ -31,7 +38,7 @@ col1, col2, col3, col4, col5, col6 = st.columns([0.3,2,1,1,1,1])
 with col2:
     st.image(
         str(LOGO1_PATH),
-        width=400
+        width=428
     )
 
 st.title(
@@ -52,13 +59,7 @@ st.markdown(
 - 多賽季歷史數據池
 - 模型抽樣比重隨賽程動態調整
 - Add / Drop 機率分析
-- Yahoo Fantasy API integration（coming soon）
-
-
-
-
-
-௹ѪΩ€Ξ     ҉҉҉    『Δικαιοσύνη』    •    『Προμηθεύς』    •    『Ολτρεμάρε』    •    『Φαντασία』    •    『Καλαθοσφαίρισης』    •    『Μυστική』    •    『Εταιρεία』       •     『Βερίτας』    ҉҉҉    £ΩѦѤӁ
+- Yahoo Fantasy API 聯盟設定導入
 
 
 """
@@ -77,6 +78,14 @@ DEFAULT_STATE = {
     "opp_paste_text": "",
     "last_result": None,
     "last_scenario_message": None,
+    "yahoo_context": None,
+    "yahoo_loaded": False,
+    "yahoo_league_input": "",
+    "yahoo_token": None,
+    "yahoo_verifier_code": "",
+    "yahoo_current_totals_loaded": False,
+    "yahoo_matchup_loaded": False,
+    "yahoo_history_loaded": False,
 }
 
 for key, default_value in DEFAULT_STATE.items():
@@ -96,13 +105,35 @@ def invalidate_loaded_rosters():
     st.session_state.rosters_loaded = False
 
 
-def roster_to_dataframe(team_list):
-    return pd.DataFrame(
-        {
-            "No.": range(1, len(team_list) + 1),
-            "Player": team_list,
-        }
-    )
+def roster_to_dataframe(team_list, yahoo_players=None):
+    yahoo_by_name = {
+        clean_player_name(player.get("name", "")): player
+        for player in (yahoo_players or [])
+        if player.get("name")
+    }
+    rows = []
+    for index, player_name in enumerate(team_list, start=1):
+        metadata = yahoo_by_name.get(clean_player_name(player_name), {})
+        eligible = metadata.get("eligible_positions") or []
+        if isinstance(eligible, str):
+            eligible = [eligible]
+        rows.append({
+            "No.": index,
+            "Player": player_name,
+            "Pos": metadata.get("selected_position") or "",
+            "Eligible": ",".join(str(value) for value in eligible if value),
+        })
+    return pd.DataFrame(rows, columns=["No.", "Player", "Pos", "Eligible"])
+
+def yahoo_roster_metadata(team_key):
+    context = st.session_state.get("yahoo_context")
+    if not isinstance(context, dict):
+        return []
+    if team_key == "my_team":
+        return context.get("my_roster", [])
+    if team_key == "opp_team":
+        return context.get("opponent_roster", [])
+    return []
 
 
 ROSTER_SLOTS = {
@@ -196,10 +227,15 @@ def parse_roster_text(raw_text):
     return players
 
 
-@st.cache_data(show_spinner=False)
-def load_roster_from_nba(player_names_tuple, seasons_tuple):
-    return build_roster(list(player_names_tuple), seasons=seasons_tuple)
+def load_yahoo_matchup_light(league_input):
+    return load_yahoo_matchup_context(league_input)
 
+
+def load_yahoo_history(context, seasons_tuple):
+    return build_yahoo_historical_rosters(
+        context=context,
+        seasons=seasons_tuple,
+    )
 
 def apply_pasted_roster(text_key, team_key, other_team_key):
     parsed_players = parse_roster_text(st.session_state[text_key])
@@ -292,12 +328,147 @@ def show_paste_team(team_key, title, text_key, other_team_key):
     st.markdown(f"#### 目前 {title}")
     if team:
         st.dataframe(
-            roster_to_dataframe(team),
+            roster_to_dataframe(team, yahoo_roster_metadata(team_key)),
             hide_index=True,
             use_container_width=True,
         )
     else:
         st.info(f"{title} 目前尚未匯入球員。")
+
+# ============================================================
+# YAHOO AUTHORIZATION + MATCHUP AUTO LOAD
+# ============================================================
+st.divider()
+st.header("Yahoo Matchup 自動載入")
+st.caption("先取得 Yahoo Verify Code。完成後，本次網頁 session 的整個 Yahoo pipeline 共用同一 OAuth token。")
+league_input = st.text_input(
+    "Yahoo League URL 或 League ID", key="yahoo_league_input",
+    placeholder="例如：1486 或 Yahoo league URL",
+)
+if st.session_state.yahoo_token is None:
+    try:
+        st.link_button("1. 開啟 Yahoo 授權頁", get_yahoo_authorization_url(),type="primary", use_container_width=True)
+    except Exception as error:
+        st.error("無法建立 Yahoo 授權連結。")
+        st.exception(error)
+    verifier_code = st.text_input(
+        "2. Yahoo Verify Code", key="yahoo_verifier_code",
+        type="password", placeholder="貼上 Yahoo 顯示的 code",
+    )
+    if st.button("完成 Yahoo 授權", type="primary", use_container_width=True,
+                 disabled=not bool(verifier_code.strip())):
+        try:
+            st.session_state.yahoo_token = exchange_yahoo_verifier(
+                verifier_code
+            )
+            
+            st.rerun()
+        except Exception as error:
+            st.session_state.yahoo_token = None
+            st.error("Verify Code 交換 token 失敗，請重新取得 code。")
+            st.exception(error)
+else:
+    auth_col, logout_col = st.columns([3, 1])
+    with auth_col:
+        st.success("Yahoo 已授權。所有 Yahoo API 呼叫共用同一 token，過期時自動 refresh。")
+    with logout_col:
+        if st.button("登出 Yahoo", use_container_width=True):
+            st.session_state.yahoo_token = None
+            st.session_state.yahoo_context = None
+            st.session_state.yahoo_loaded = False
+            st.session_state.yahoo_matchup_loaded = False
+            st.session_state.yahoo_history_loaded = False
+            st.session_state.yahoo_current_totals_loaded = False
+            invalidate_loaded_rosters()
+            st.rerun()
+    if st.button(
+        "1. 載入目前 Yahoo Matchup",
+        type="primary",
+        use_container_width=True,
+        disabled=not bool(league_input.strip()),
+    ):
+        try:
+            with st.spinner("正在載入 matchup、雙方 rosters 與目前累積數據..."):
+                yc = load_yahoo_matchup_light(league_input.strip())
+
+            st.session_state.yahoo_context = yc
+            st.session_state.yahoo_loaded = True
+            st.session_state.yahoo_matchup_loaded = True
+            st.session_state.yahoo_history_loaded = False
+            st.session_state.my_team = [
+                player["name"] for player in yc["my_roster"]
+            ]
+            st.session_state.opp_team = [
+                player["name"] for player in yc["opponent_roster"]
+            ]
+
+            # New matchup means any previously built historical roster is stale.
+            invalidate_loaded_rosters()
+
+            current_stat_fields = [
+                "FGA", "FGM", "FTA", "FTM", "3PM",
+                "Pts", "Reb", "Ast", "Stl", "Blk", "TO",
+            ]
+            for stat in current_stat_fields:
+                st.session_state[f"current_my_{stat}"] = int(
+                    yc["current_my"].get(stat, 0)
+                )
+                st.session_state[f"current_opp_{stat}"] = int(
+                    yc["current_opp"].get(stat, 0)
+                )
+
+            st.session_state.yahoo_current_totals_loaded = True
+            st.session_state.last_result = None
+            st.rerun()
+        except Exception as error:
+            st.session_state.yahoo_loaded = False
+            st.session_state.yahoo_matchup_loaded = False
+            st.error("Yahoo matchup 輕量載入失敗。")
+            st.exception(error)
+
+    if st.session_state.yahoo_matchup_loaded:
+        st.success("Matchup、雙方陣容與目前累積數據已載入。")
+
+        history_button_label = (
+            "2. 重新載入雙方球員歷史資料"
+            if st.session_state.yahoo_history_loaded
+            else "2. 載入雙方球員歷史資料"
+        )
+        if st.button(
+            history_button_label,
+            type="primary",
+            use_container_width=True,
+            disabled=not st.session_state.yahoo_matchup_loaded,
+        ):
+            try:
+                with st.spinner(
+                    "正在載入 2018-19 至 2026-27 歷史資料；"
+                    "已快取資料會直接讀取，只補齊缺少部分..."
+                ):
+                    historical = load_yahoo_history(
+                        st.session_state.yahoo_context,
+                        tuple(SEASONS),
+                    )
+
+                st.session_state.my_roster_data = (
+                    historical["my_roster_engine"]
+                )
+                st.session_state.opp_roster_data = (
+                    historical["opponent_roster_engine"]
+                )
+                st.session_state.rosters_loaded = True
+                st.session_state.yahoo_history_loaded = True
+                st.session_state.last_result = None
+                st.rerun()
+            except Exception as error:
+                st.session_state.yahoo_history_loaded = False
+                invalidate_loaded_rosters()
+                st.error("Yahoo 歷史資料載入失敗。")
+                st.exception(error)
+
+if st.session_state.yahoo_loaded and st.session_state.yahoo_context:
+    yc = st.session_state.yahoo_context
+    st.info(f"已連接 League {yc['public_league_id']} | API key: {yc['league_key']} | Week {yc['current_week']}")
 
 # ============================================================
 # PASTE ROSTERS
@@ -330,6 +501,41 @@ with opp_col:
 # ROSTER SUMMARY
 # ============================================================
 st.divider()
+
+Oneal_PATH = APP_FOLDER / "O_neal.png"
+Garnett_PATH = APP_FOLDER / "Garnett.png"
+James_PATH = APP_FOLDER / "James.png"
+Jordan_PATH = APP_FOLDER / "Jordan.png"
+Bryant_PATH = APP_FOLDER / "Bryant.png"
+
+col1, col2, col3, col4, col5, col6, col7 = st.columns([1,1,1,1,1,1,1])
+
+with col2:
+    st.image(
+        str(Bryant_PATH),
+        width=92
+    )
+with col3:
+    st.image(
+        str(Jordan_PATH),
+        width=95
+    )
+with col4:
+    st.image(
+        str(James_PATH),
+        width=99
+    )
+with col5:
+    st.image(
+        str(Garnett_PATH),
+        width=104
+    )
+with col6:
+    st.image(
+        str(Oneal_PATH),
+        width=107
+    )
+
 st.header("陣型")
 metric_col1, metric_col2 = st.columns(2)
 with metric_col1:
@@ -341,55 +547,39 @@ summary_col1, summary_col2 = st.columns(2)
 with summary_col1:
     st.markdown("#### 我方")
     st.dataframe(
-        roster_to_dataframe(st.session_state.my_team),
+        roster_to_dataframe(
+            st.session_state.my_team,
+            yahoo_roster_metadata("my_team"),
+        ),
         hide_index=True,
         use_container_width=True,
     )
 with summary_col2:
     st.markdown("#### 敵方")
     st.dataframe(
-        roster_to_dataframe(st.session_state.opp_team),
+        roster_to_dataframe(
+            st.session_state.opp_team,
+            yahoo_roster_metadata("opp_team"),
+        ),
         hide_index=True,
         use_container_width=True,
     )
 
 # ============================================================
-# LOAD NBA DATA
+# HISTORICAL DATA STATUS (YAHOO ONLY)
 # ============================================================
 st.divider()
-st.header("載入NBA自2018至2027球季比賽數據")
-st.write("按下按鈕後，程式會透過 NBA API 載入兩隊球員的賽季逐場比賽紀錄。")
-
-if st.button("輸入雙方陣容", type="primary", use_container_width=True):
-    if not st.session_state.my_team:
-        st.error("本陣尚未匯入任何球員。")
-    elif not st.session_state.opp_team:
-        st.error("敵陣尚未匯入任何球員。")
-    else:
-        try:
-            with st.spinner("Loading My Team multi-season data..."):
-                st.session_state.my_roster_data = load_roster_from_nba(
-                    tuple(st.session_state.my_team), tuple(SEASONS)
-                )
-            with st.spinner("Loading Opponent Team multi-season data..."):
-                st.session_state.opp_roster_data = load_roster_from_nba(
-                    tuple(st.session_state.opp_team), tuple(SEASONS)
-                )
-            st.session_state.rosters_loaded = True
-            st.success("Both rosters were loaded successfully.")
-        except Exception as error:
-            invalidate_loaded_rosters()
-            st.error("載入 roster 時發生錯誤。")
-            st.exception(error)
-
+st.header("Yahoo 歷史資料狀態")
 if st.session_state.rosters_loaded:
-    status_col1, status_col2 = st.columns(2)
-    with status_col1:
-        st.success(f"My Team loaded: {len(st.session_state.my_roster_data)} players")
-    with status_col2:
-        st.success(f"Opponent loaded: {len(st.session_state.opp_roster_data)} players")
+    c1, c2 = st.columns(2)
+    with c1:
+        st.success(f"My Team Yahoo history: {len(st.session_state.my_roster_data)} players")
+    with c2:
+        st.success(f"Opponent Yahoo history: {len(st.session_state.opp_roster_data)} players")
+elif st.session_state.yahoo_matchup_loaded:
+    st.info("Matchup 已載入；請按「2. 載入雙方球員歷史資料」以啟用模擬。")
 else:
-    st.info("陣容尚未載入 NBA multi-season data。")
+    st.info("請先連接 Yahoo 並載入目前 Matchup。")
 
 # ============================================================
 # MATCHUP SETTINGS
@@ -411,73 +601,12 @@ with sim_col:
     )
 
 st.markdown("### 當前各項累積數據")
-st.caption("FG% 與 FT% 不直接輸入百分比，請輸入 FGM、FGA、FTM、FTA。")
+st.caption("Yahoo 載入後會自動填入目前累積值；FG% 與 FT% 由 FGM/FGA、FTM/FTA 計算。")
 stat_columns = ["FGA", "FGM", "FTA", "FTM", "3PM", "Pts", "Reb", "Ast", "Stl", "Blk", "TO"]
 
 
-# ========================================================
-# SAVE / LOAD / RESET MATCHUP
-# ========================================================
-
-save_col, load_col, reset_col = st.columns(3)
-
-# ---------- SAVE ----------
-with save_col:
-
-    matchup_data = {
-        "current_my": {
-            stat: st.session_state.get(f"current_my_{stat}", 0)
-            for stat in stat_columns
-        },
-        "current_opp": {
-            stat: st.session_state.get(f"current_opp_{stat}", 0)
-            for stat in stat_columns
-        }
-    }
-
-    st.download_button(
-        "💾 Save Matchup",
-        data=json.dumps(matchup_data, indent=4),
-        file_name="matchup_snapshot.json",
-        mime="application/json"
-    )
-
-# ---------- LOAD ----------
-with load_col:
-
-    uploaded_matchup = st.file_uploader(
-        "📂 Load",
-        type=["json"],
-        key="matchup_loader"
-    )
-    
-    if uploaded_matchup is not None:
-    
-        if st.button("Load Snapshot"):
-    
-            loaded = json.load(uploaded_matchup)
-    
-            for stat, value in loaded["current_my"].items():
-                st.session_state[f"current_my_{stat}"] = value
-    
-            for stat, value in loaded["current_opp"].items():
-                st.session_state[f"current_opp_{stat}"] = value
-    
-            st.success("Matchup loaded successfully.")
-
-
-# ---------- RESET ----------
-with reset_col:
-
-    if st.button("🗑 Reset Matchup"):
-
-        for stat in stat_columns:
-
-            st.session_state[f"current_my_{stat}"] = 0
-            st.session_state[f"current_opp_{stat}"] = 0
-
-        st.rerun()
-
+if st.session_state.get("yahoo_current_totals_loaded"):
+    st.success("Yahoo 本週目前累積數據已自動填入。你仍可手動修改。")
 
 my_totals_col, opp_totals_col = st.columns(2)
 
@@ -486,7 +615,7 @@ with my_totals_col:
     current_my = {}
     for stat in stat_columns:
         current_my[stat] = st.number_input(
-            f"My {stat}", min_value=0, value=0, step=1, key=f"current_my_{stat}"
+            f"My {stat}", min_value=0, step=1, key=f"current_my_{stat}"
         )
 
 with opp_totals_col:
@@ -494,7 +623,7 @@ with opp_totals_col:
     current_opp = {}
     for stat in stat_columns:
         current_opp[stat] = st.number_input(
-            f"Opponent {stat}", min_value=0, value=0, step=1, key=f"current_opp_{stat}"
+            f"Opponent {stat}", min_value=0, step=1, key=f"current_opp_{stat}"
         )
 
 # ============================================================
@@ -559,7 +688,7 @@ if run_scenario:
 
     if not st.session_state.rosters_loaded:
         errors.append(
-            "請先按下 Load Both Rosters。"
+            "請先按下「2. 載入雙方球員歷史資料」。"
         )
 
     # Add Player 可以留空
@@ -625,6 +754,7 @@ if run_scenario:
                     seasons=SEASONS,
                     n_sim=int(n_sim),
                     random_seed=12345,
+                    yahoo_league_key=st.session_state.yahoo_context["league_key"],
                 )
 
             # Only replace the saved result after a successful run.
@@ -1277,5 +1407,15 @@ with col5:
         str(Shoe_PATH),
         width=120
     )
+
+
+st.markdown(
+    """
+
+௹ѪΩ€Ξ     ҉҉҉    『Δικαιοσύνη』    •    『Προμηθεύς』    •    『Ολτρεμάρε』    •    『Φαντασία』    •    『Καλαθοσφαίρισης』    •    『Μυστική』    •    『Εταιρεία』       •     『Βερίτας』    ҉҉҉    £ΩѦѤӁ
+
+
+"""
+)
 
 

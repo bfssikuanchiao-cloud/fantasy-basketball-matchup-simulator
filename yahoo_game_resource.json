@@ -1,0 +1,24 @@
+{
+  "fantasy_content": {
+    "xml:lang": "en-US",
+    "yahoo:uri": "/fantasy/v2/game/478",
+    "game": [
+      {
+        "game_key": "478",
+        "game_id": "478",
+        "name": "Basketball",
+        "code": "nba",
+        "type": "full",
+        "url": "https://basketball.fantasysports.yahoo.com/nba",
+        "season": "2026",
+        "is_registration_over": 0,
+        "is_game_over": 0,
+        "is_offseason": 0,
+        "is_live_draft_lobby_active": 1
+      }
+    ],
+    "time": "9.4759464263916ms",
+    "copyright": "Certain Data by Sportradar, Stats Perform and Rotowire",
+    "refresh_rate": "30"
+  }
+}

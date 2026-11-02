@@ -1,0 +1,14 @@
+# Secrets - NEVER upload to GitHub
+.streamlit/secrets.toml
+secrets.json
+
+# Python cache
+__pycache__/
+*.pyc
+
+# Jupyter checkpoints
+.ipynb_checkpoints/
+
+# Virtual environment
+.venv/
+venv/

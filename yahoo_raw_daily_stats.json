@@ -1,0 +1,270 @@
+{
+  "fantasy_content": {
+    "xml:lang": "en-US",
+    "yahoo:uri": "/fantasy/v2/player/478.p.5352/stats;type=date;date=2026-10-28",
+    "player": [
+      [
+        {
+          "player_key": "478.p.5352"
+        },
+        {
+          "player_id": "5352"
+        },
+        {
+          "name": {
+            "full": "Nikola Jokić",
+            "first": "Nikola",
+            "last": "Jokić",
+            "ascii_first": "Nikola",
+            "ascii_last": "Jokić"
+          }
+        },
+        {
+          "url": "https://sports.yahoo.com/nba/players/5352"
+        },
+        {
+          "editorial_player_key": "nba.p.5352"
+        },
+        {
+          "editorial_team_key": "nba.t.7"
+        },
+        {
+          "editorial_team_full_name": "Denver Nuggets"
+        },
+        {
+          "editorial_team_abbr": "DEN"
+        },
+        {
+          "editorial_team_url": "https://sports.yahoo.com/nba/teams/denver/"
+        },
+        {
+          "is_keeper": {
+            "status": false,
+            "cost": false,
+            "kept": false
+          }
+        },
+        {
+          "uniform_number": "15"
+        },
+        {
+          "display_position": "C"
+        },
+        {
+          "headshot": {
+            "url": "https://s.yimg.com/iu/api/res/1.2/v4zAdX6cZwzH_1QspiQgMg--~C/YXBwaWQ9eXNwb3J0cztjaD0yMzM2O2NyPTE7Y3c9MTc5MDtkeD04NTc7ZHk9MDtmaT11bGNyb3A7aD02MDtxPTEwMDt3PTQ2/https://s.yimg.com/xe/i/us/sp/v/nba_cutout/players_l/10152026/5352.1.png",
+            "size": "small"
+          },
+          "image_url": "https://s.yimg.com/iu/api/res/1.2/v4zAdX6cZwzH_1QspiQgMg--~C/YXBwaWQ9eXNwb3J0cztjaD0yMzM2O2NyPTE7Y3c9MTc5MDtkeD04NTc7ZHk9MDtmaT11bGNyb3A7aD02MDtxPTEwMDt3PTQ2/https://s.yimg.com/xe/i/us/sp/v/nba_cutout/players_l/10152026/5352.1.png"
+        },
+        {
+          "is_undroppable": "0"
+        },
+        {
+          "position_type": "P"
+        },
+        [],
+        {
+          "eligible_positions": [
+            {
+              "position": "C"
+            }
+          ]
+        },
+        {
+          "eligible_positions_to_add": []
+        },
+        [],
+        [],
+        {
+          "has_player_notes": 1
+        },
+        [],
+        {
+          "player_notes_last_timestamp": 1793242950
+        }
+      ],
+      {
+        "player_stats": {
+          "0": {
+            "coverage_type": "date",
+            "date": "2026-10-28"
+          },
+          "stats": [
+            {
+              "stat": {
+                "stat_id": "0",
+                "value": "1"
+              }
+            },
+            {
+              "stat": {
+                "stat_id": "1",
+                "value": "1"
+              }
+            },
+            {
+              "stat": {
+                "stat_id": "2",
+                "value": "34"
+              }
+            },
+            {
+              "stat": {
+                "stat_id": "3",
+                "value": "13"
+              }
+            },
+            {
+              "stat": {
+                "stat_id": "4",
+                "value": "8"
+              }
+            },
+            {
+              "stat": {
+                "stat_id": "5",
+                "value": ".615"
+              }
+            },
+            {
+              "stat": {
+                "stat_id": "6",
+                "value": "5"
+              }
+            },
+            {
+              "stat": {
+                "stat_id": "7",
+                "value": "5"
+              }
+            },
+            {
+              "stat": {
+                "stat_id": "8",
+                "value": "1.000"
+              }
+            },
+            {
+              "stat": {
+                "stat_id": "9",
+                "value": "0"
+              }
+            },
+            {
+              "stat": {
+                "stat_id": "10",
+                "value": "0"
+              }
+            },
+            {
+              "stat": {
+                "stat_id": "11",
+                "value": "-"
+              }
+            },
+            {
+              "stat": {
+                "stat_id": "12",
+                "value": "21"
+              }
+            },
+            {
+              "stat": {
+                "stat_id": "13",
+                "value": "2"
+              }
+            },
+            {
+              "stat": {
+                "stat_id": "14",
+                "value": "11"
+              }
+            },
+            {
+              "stat": {
+                "stat_id": "15",
+                "value": "13"
+              }
+            },
+            {
+              "stat": {
+                "stat_id": "16",
+                "value": "10"
+              }
+            },
+            {
+              "stat": {
+                "stat_id": "17",
+                "value": "1"
+              }
+            },
+            {
+              "stat": {
+                "stat_id": "18",
+                "value": "0"
+              }
+            },
+            {
+              "stat": {
+                "stat_id": "19",
+                "value": "7"
+              }
+            },
+            {
+              "stat": {
+                "stat_id": "20",
+                "value": "1.43"
+              }
+            },
+            {
+              "stat": {
+                "stat_id": "21",
+                "value": "4"
+              }
+            },
+            {
+              "stat": {
+                "stat_id": "22",
+                "value": "0"
+              }
+            },
+            {
+              "stat": {
+                "stat_id": "23",
+                "value": "0"
+              }
+            },
+            {
+              "stat": {
+                "stat_id": "24",
+                "value": "0"
+              }
+            },
+            {
+              "stat": {
+                "stat_id": "25",
+                "value": "0"
+              }
+            },
+            {
+              "stat": {
+                "stat_id": "27",
+                "value": "1"
+              }
+            },
+            {
+              "stat": {
+                "stat_id": "28",
+                "value": "1"
+              }
+            }
+          ]
+        }
+      }
+    ],
+    "time": "34.125089645386ms",
+    "copyright": "Certain Data by Sportradar, Stats Perform and Rotowire",
+    "refresh_rate": "30"
+  }
+}
