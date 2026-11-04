@@ -740,9 +740,26 @@ def download_yahoo_player_season(
     if cache_path.exists():
         cached = pd.read_csv(cache_path)
         cached["Date"] = pd.to_datetime(cached["Date"], errors="coerce")
-        cached = cached.dropna(subset=["Date"])
+        cached = (
+            cached.dropna(subset=["Date"])
+            .drop_duplicates(["Date"], keep="last")
+            .sort_values("Date", ascending=False)
+            .reset_index(drop=True)
+        )
     else:
         cached = pd.DataFrame()
+
+    # Completed seasons are immutable. If a valid player-season CSV already
+    # exists (for example from the GitHub seed cache on Streamlit Cloud), use
+    # it as the authoritative final cache and make ZERO Yahoo daily requests.
+    # The current season keeps the existing incremental/checked-date behavior.
+    if season != CURRENT_SEASON and not cached.empty:
+        print(
+            f"[YAHOO_SEASON_CACHE] {player_name} | {season} | "
+            f"FINAL HISTORICAL CACHE -> {len(cached)} games | "
+            "daily_requests=0"
+        )
+        return cached, player
 
     checked_dates = set()
     if checked_path.exists():
