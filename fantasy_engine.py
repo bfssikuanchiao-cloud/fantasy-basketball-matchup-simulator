@@ -7,6 +7,7 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 import requests
+import time
 import streamlit as st
 import unicodedata
 
@@ -36,10 +37,6 @@ SEASONS = (
     "2024-25",
     "2023-24",
     "2022-23",
-    "2021-22",
-    "2020-21",
-    "2019-20",
-    "2018-19"
 )
 
 CURRENT_SEASON = "2026-27"
@@ -241,11 +238,17 @@ def get_my_yahoo_team_key(game_key, league_key=None):
         raise RuntimeError(f"No Yahoo team found for game key {game_key}")
     return team_keys[0]
 
-def get_yahoo_league_context(league_key):
-    """Return current Yahoo matchup, rosters and accumulated weekly stats."""
+def get_yahoo_league_context(
+    league_key,
+    selected_my_team_key=None,
+    selected_opponent_team_key=None,
+):
+    """Return any selected league matchup, rosters and current weekly stats."""
     game_key = str(league_key).split(".")[0]
-    my_team_key = get_my_yahoo_team_key(game_key, league_key=league_key)
-
+    signed_in_team_key = get_my_yahoo_team_key(
+        game_key,
+        league_key=league_key,
+    )
     league_root = _yahoo_get_xml(f"league/{league_key}")
     current_week = _child_text(
         next(iter(_descendants(league_root, "league")), None),
@@ -254,89 +257,79 @@ def get_yahoo_league_context(league_key):
     if not current_week:
         raise RuntimeError("Yahoo league response did not contain current_week")
 
+    teams_root = _yahoo_get_xml(f"league/{league_key}/teams")
+    league_teams = []
+    seen_team_keys = set()
+    for team in _descendants(teams_root, "team"):
+        team_key = _child_text(team, "team_key")
+        team_name = _child_text(team, "name")
+        if team_key and team_name and team_key not in seen_team_keys:
+            league_teams.append({"team_key": team_key, "name": team_name})
+            seen_team_keys.add(team_key)
+    if len(league_teams) < 2:
+        raise RuntimeError("Yahoo league must contain at least two teams.")
+
+    team_keys = {team["team_key"] for team in league_teams}
     scoreboard = _yahoo_get_xml(
         f"league/{league_key}/scoreboard;week={current_week}"
     )
+    scoreboard_teams = {}
+    current_matchup_opponents = {}
+    for matchup in _descendants(scoreboard, "matchup"):
+        keyed_teams = []
+        for team in _descendants(matchup, "team"):
+            team_key = _child_text(team, "team_key")
+            if team_key and team_key in team_keys:
+                scoreboard_teams[team_key] = team
+                keyed_teams.append(team_key)
+        if len(keyed_teams) == 2:
+            left_key, right_key = keyed_teams
+            current_matchup_opponents[left_key] = right_key
+            current_matchup_opponents[right_key] = left_key
+
+    my_team_key = selected_my_team_key or signed_in_team_key
+    if my_team_key not in team_keys:
+        raise ValueError(f"Selected Team A is not in league {league_key}: {my_team_key}")
+    default_opponent_key = current_matchup_opponents.get(my_team_key)
+    if not default_opponent_key:
+        default_opponent_key = next(
+            team["team_key"] for team in league_teams
+            if team["team_key"] != my_team_key
+        )
+    opponent_team_key = selected_opponent_team_key or default_opponent_key
+    if opponent_team_key not in team_keys:
+        raise ValueError(
+            f"Selected Team B is not in league {league_key}: {opponent_team_key}"
+        )
+    if my_team_key == opponent_team_key:
+        raise ValueError("Team A and Team B must be different teams.")
 
     def extract_team_stats(team_element):
-        """Extract Yahoo weekly matchup totals into engine raw-stat fields."""
         values = {}
         if team_element is None:
             return values
-
         team_stats_nodes = _descendants(team_element, "team_stats")
         search_root = team_stats_nodes[0] if team_stats_nodes else team_element
-
         for stat in _descendants(search_root, "stat"):
             stat_id = _child_text(stat, "stat_id")
             value = _child_text(stat, "value")
-
-            # Yahoo weekly composite stats confirmed from the live response:
-            # 9004003 = FGM/FGA, for example 150/307
-            # 9007006 = FTM/FTA, for example 58/67
             if stat_id == "9004003" and value and "/" in str(value):
                 made, attempted = str(value).split("/", 1)
                 values["FGM"] = _safe_number(made.strip())
                 values["FGA"] = _safe_number(attempted.strip())
                 continue
-
             if stat_id == "9007006" and value and "/" in str(value):
                 made, attempted = str(value).split("/", 1)
                 values["FTM"] = _safe_number(made.strip())
                 values["FTA"] = _safe_number(attempted.strip())
                 continue
-
-            # Normal scoring categories. stat_id 5 and 8 are percentages and
-            # are intentionally not used for the raw FGM/FGA/FTM/FTA totals.
             if stat_id in YAHOO_STAT_IDS and value is not None:
                 values[YAHOO_STAT_IDS[stat_id]] = _safe_number(value)
-
         print(
             "[YAHOO_WEEK_PARSED] "
             + " | ".join(f"{key}={value}" for key, value in values.items())
         )
         return values
-
-    opponent_team_key = None
-    my_scoreboard_team = None
-    opp_scoreboard_team = None
-
-    for matchup in _descendants(scoreboard, "matchup"):
-        matchup_teams = _descendants(matchup, "team")
-        keyed_teams = [
-            (_child_text(team, "team_key"), team)
-            for team in matchup_teams
-            if _child_text(team, "team_key")
-        ]
-        matchup_team_keys = [key for key, _ in keyed_teams]
-
-        if my_team_key in matchup_team_keys:
-            my_scoreboard_team = next(
-                team for key, team in keyed_teams if key == my_team_key
-            )
-            others = [
-                (key, team) for key, team in keyed_teams
-                if key != my_team_key
-            ]
-            if others:
-                opponent_team_key, opp_scoreboard_team = others[0]
-            break
-
-    if not opponent_team_key:
-        scoreboard_matchups = []
-        for matchup_node in _descendants(scoreboard, "matchup"):
-            keys = [
-                _child_text(team, "team_key")
-                for team in _descendants(matchup_node, "team")
-                if _child_text(team, "team_key")
-            ]
-            if keys:
-                scoreboard_matchups.append(keys)
-        raise RuntimeError(
-            "Could not identify the current Yahoo matchup opponent. "
-            f"my_team_key={my_team_key}; "
-            f"scoreboard_matchups={scoreboard_matchups}"
-        )
 
     def load_roster(team_key):
         root = _yahoo_get_xml(f"team/{team_key}/roster")
@@ -347,11 +340,8 @@ def get_yahoo_league_context(league_key):
                 players_out.append(item)
         return players_out
 
-    def load_week_stats(team_key, scoreboard_team):
-        # Always inspect both Yahoo sources. Scoreboard contains the visible
-        # matchup categories; team weekly stats can contain richer display data.
-        scoreboard_values = extract_team_stats(scoreboard_team)
-
+    def load_week_stats(team_key):
+        scoreboard_values = extract_team_stats(scoreboard_teams.get(team_key))
         team_root = _yahoo_get_xml(
             f"team/{team_key}/stats;type=week;week={current_week}"
         )
@@ -359,21 +349,17 @@ def get_yahoo_league_context(league_key):
         team_values = extract_team_stats(
             team_nodes[0] if team_nodes else team_root
         )
-
         values = dict(scoreboard_values)
         values.update(team_values)
-
         required_fields = list(YAHOO_STAT_IDS.values())
         missing_fields = [
-            field for field in required_fields
-            if field not in values
+            field for field in required_fields if field not in values
         ]
         if missing_fields:
             print(
                 f"[YAHOO_WEEK_WARNING] team={team_key} | "
                 f"missing={missing_fields}"
             )
-
         complete = {
             field: int(round(values.get(field, 0)))
             for field in required_fields
@@ -384,20 +370,46 @@ def get_yahoo_league_context(league_key):
         )
         return complete
 
-    current_my = load_week_stats(my_team_key, my_scoreboard_team)
-    current_opp = load_week_stats(opponent_team_key, opp_scoreboard_team)
-
+    team_name_by_key = {
+        team["team_key"]: team["name"] for team in league_teams
+    }
+    print(
+        f"[YAHOO_MATCHUP_SELECTION] league={league_key} | "
+        f"team_a={team_name_by_key[my_team_key]} ({my_team_key}) | "
+        f"team_b={team_name_by_key[opponent_team_key]} ({opponent_team_key})"
+    )
     return {
         "league_key": league_key,
         "game_key": game_key,
         "current_week": int(current_week),
+        "signed_in_team_key": signed_in_team_key,
+        "league_teams": league_teams,
+        "current_matchup_opponents": current_matchup_opponents,
         "my_team_key": my_team_key,
         "opponent_team_key": opponent_team_key,
+        "my_team_name": team_name_by_key[my_team_key],
+        "opponent_team_name": team_name_by_key[opponent_team_key],
         "my_roster": load_roster(my_team_key),
         "opponent_roster": load_roster(opponent_team_key),
-        "current_my": current_my,
-        "current_opp": current_opp,
+        "current_my": load_week_stats(my_team_key),
+        "current_opp": load_week_stats(opponent_team_key),
     }
+
+
+def select_yahoo_league_matchup(context, my_team_key, opponent_team_key):
+    """Reload only the selected league matchup context for Team A vs Team B."""
+    if not isinstance(context, dict) or not context.get("league_key"):
+        raise ValueError("Yahoo league context is missing or invalid.")
+    selected = get_yahoo_league_context(
+        context["league_key"],
+        selected_my_team_key=my_team_key,
+        selected_opponent_team_key=opponent_team_key,
+    )
+    for key in ("public_league_id", "public_team_number"):
+        if key in context:
+            selected[key] = context[key]
+    selected["historical_loaded"] = False
+    return selected
 
 def _season_start_year(season):
     return str(season).split("-")[0]
@@ -555,9 +567,52 @@ def find_yahoo_player(
             )
             return roster_item
 
-    # Historical seasons always resolve name -> player_key within that game.
+    # Historical seasons first reuse Yahoo's stable player_id. Yahoo player
+    # keys are season-scoped (<game_key>.p.<player_id>), while player_id stays
+    # stable across NBA fantasy seasons. Validate the rebuilt key before use.
+    roster_item = (
+        dict(current_roster_player)
+        if isinstance(current_roster_player, dict)
+        else {}
+    )
+    player_id = roster_item.get("player_id")
+    if not player_id:
+        current_cached = player_cache.get(CURRENT_SEASON)
+        if isinstance(current_cached, dict):
+            player_id = current_cached.get("player_id")
+
+    if player_id:
+        candidate_key = f"{game_key}.p.{player_id}"
+        try:
+            root = _yahoo_get_xml(f"player/{candidate_key}")
+            candidate = _exact_player_from_root(root, player_name)
+        except Exception as error:
+            candidate = None
+            print(
+                f"[YAHOO_PLAYER_KEY] direct-key validation failed | "
+                f"player={player_name} season={season} "
+                f"candidate={candidate_key} | "
+                f"error={type(error).__name__}: {error}"
+            )
+
+        if candidate and candidate.get("player_key") == candidate_key:
+            player_cache[season] = candidate
+            _save_yahoo_player_key_cache(cache)
+            print(
+                f"[YAHOO_PLAYER_KEY] {player_name} | {season} | "
+                f"PLAYER_ID RESOLVED -> {candidate_key}"
+            )
+            return candidate
+
+    # Compatibility fallback only. Yahoo's game-level search can return an
+    # unfiltered first page, so accept only an exact normalized-name match.
     search_terms = [str(player_name).strip()]
-    last_name = str(player_name).strip().split()[-1]
+    normalized_parts = normalize_player_name(player_name).split()
+    suffixes = {"jr", "sr", "ii", "iii", "iv", "v"}
+    last_name = next(
+        (part for part in reversed(normalized_parts) if part not in suffixes),
+        "",
+    )
     if last_name and last_name not in search_terms:
         search_terms.append(last_name)
 
@@ -772,9 +827,48 @@ def download_yahoo_player_season(
             f"{index}/{total} | {timestamp:%Y-%m-%d}"
         )
 
-        row = _fetch_yahoo_daily(
-            player["player_key"], timestamp, timeout=timeout
-        )
+        row = None
+        daily_request_completed = False
+        max_attempts = 3
+
+        for attempt in range(1, max_attempts + 1):
+            try:
+                row = _fetch_yahoo_daily(
+                    player["player_key"], timestamp, timeout=timeout
+                )
+                daily_request_completed = True
+                break
+            except (RuntimeError, requests.ConnectionError, requests.Timeout) as error:
+                # Retry only transient Yahoo/server/network failures. Keep
+                # authentication and other API/programming errors visible.
+                is_http_500 = (
+                    isinstance(error, RuntimeError)
+                    and "Yahoo API HTTP 500" in str(error)
+                )
+                is_transient_network_error = isinstance(
+                    error,
+                    (requests.ConnectionError, requests.Timeout),
+                )
+                if not (is_http_500 or is_transient_network_error):
+                    raise
+
+                print(
+                    f"[YAHOO_DAILY_RETRY] {player_name} | {season} | "
+                    f"{timestamp:%Y-%m-%d} | attempt={attempt}/{max_attempts} | "
+                    f"error={type(error).__name__}: {error}"
+                )
+                if attempt < max_attempts:
+                    time.sleep(attempt)
+
+        if not daily_request_completed:
+            # Keep prior checkpoints; do not mark this failed date checked.
+            # The date remains pending and will be retried on the next run.
+            print(
+                f"[YAHOO_DAILY_WARNING] {player_name} | {season} | "
+                f"{timestamp:%Y-%m-%d} | transient request failure after "
+                f"{max_attempts} attempts | NOT MARKED CHECKED -> CONTINUE"
+            )
+            continue
 
         if row is not None:
             combined = pd.concat(
@@ -869,6 +963,7 @@ def get_player_df_from_yahoo(
         current_league_key=league_key,
     )
     season_frames = []
+    season_game_counts = []
     identified = dict(roster_player) if roster_player is not None else None
 
     for season in seasons:
@@ -882,6 +977,7 @@ def get_player_df_from_yahoo(
         )
 
         if season_player is None:
+            season_game_counts.append((season, 0, "NOT FOUND"))
             continue
 
         if season == CURRENT_SEASON:
@@ -890,8 +986,22 @@ def get_player_df_from_yahoo(
             identified = season_player
 
         normalized = normalize_yahoo_game_log(raw, season, name)
+        game_count = len(normalized)
+        status = "LOADED" if game_count > 0 else "0 ROWS"
+        season_game_counts.append((season, game_count, status))
         if not normalized.empty:
             season_frames.append(normalized)
+
+    print("\n" + "=" * 72)
+    print(f"YAHOO HISTORICAL GAME COUNT | {name}")
+    print("=" * 72)
+    total_games = 0
+    for season, game_count, status in season_game_counts:
+        total_games += game_count
+        print(f"  {season} | {game_count:>3} games | {status}")
+    print("-" * 72)
+    print(f"  TOTAL   | {total_games:>3} games")
+    print("=" * 72)
 
     if not season_frames:
         print(
@@ -999,6 +1109,11 @@ def build_roster(
         )
         if df.empty:
             print(f"WARNING: {name} Yahoo DataFrame is empty")
+        df.attrs["yahoo_status"] = roster_player.get("status")
+        df.attrs["selected_position"] = roster_player.get("selected_position")
+        df.attrs["eligible_positions"] = list(
+            roster_player.get("eligible_positions") or []
+        )
         roster[name] = df
     return roster
 
@@ -1036,21 +1151,13 @@ def build_yahoo_historical_rosters(context, seasons=SEASONS):
     my_players = list(context["my_roster"])
     opponent_players = list(context["opponent_roster"])
 
-    injured_slots = {"IL", "IL+", "IR", "IR+"}
-    my_simulation_players = [
-        player for player in my_players
-        if str(player.get("selected_position") or "").strip().upper()
-        not in injured_slots
-    ]
-    opponent_simulation_players = [
-        player for player in opponent_players
-        if str(player.get("selected_position") or "").strip().upper()
-        not in injured_slots
-    ]
-
+    # Keep every roster player, including IL/IL+/IR/IR+. Injury status now
+    # controls the default future-game selection in app.py, while users may
+    # manually include a projected return game.
+    my_simulation_players = my_players
+    opponent_simulation_players = opponent_players
     my_names = [player["name"] for player in my_simulation_players]
     opponent_names = [player["name"] for player in opponent_simulation_players]
-
     print(
         f"[YAHOO_HISTORY_START] league={league_key} | "
         f"seasons={len(seasons)} | my_players={len(my_names)} | "
@@ -1321,135 +1428,99 @@ def apply_single_game_weight(
 # Weight Cache
 # ============================================================
 
+def _normalize_selected_game_dates(selected_game_dates, player_name):
+    if not isinstance(selected_game_dates, dict):
+        return None
+    player_dates = selected_game_dates.get(player_name)
+    if player_dates is None:
+        return None
+    if isinstance(player_dates, dict):
+        player_dates = [date_value for date_value, enabled in player_dates.items() if enabled]
+    return {
+        pd.Timestamp(value).normalize()
+        for value in (player_dates or [])
+        if not pd.isna(pd.to_datetime(value, errors="coerce"))
+    }
+
+
 def prepare_player_simulation(
     player_name,
     player_df,
     schedule_df,
     start_date,
-    end_date
+    end_date,
+    selected_game_dates=None,
 ):
-
     print("\n" + "=" * 80)
     print(f"Preparing player: {player_name}")
-
-    # ====================================================
-    # VALIDATION
-    # ====================================================
-
     if player_df is None:
-
-        raise ValueError(
-            f"{player_name}: player_df is None"
-        )
-
+        raise ValueError(f"{player_name}: player_df is None")
     if getattr(player_df, "empty", True):
-
-        raise ValueError(
-            f"{player_name}: EMPTY DATAFRAME"
-        )
-
-    # ====================================================
-    # CURRENT TEAM
-    # ====================================================
-
-    team = player_df.attrs.get(
-        "current_team"
-    )
-
+        raise ValueError(f"{player_name}: EMPTY DATAFRAME")
+    team = player_df.attrs.get("current_team")
     if not team:
-
-        raise ValueError(
-            f"{player_name} 缺少 current_team。"
-        )
-
-    team = str(
-        team
-    ).strip().upper()
-
-    print(
-        f"Current Team: {team}"
-    )
-
-    # ====================================================
-    # FUTURE GAMES
-    # ====================================================
-
+        raise ValueError(f"{player_name} 缺少 current_team。")
+    team = str(team).strip().upper()
     games_df = get_games_in_range(
         schedule_df=schedule_df,
         team=team,
         start_date=start_date,
-        end_date=end_date
+        end_date=end_date,
     )
-
+    scheduled_games_count = len(games_df)
+    selected_dates = _normalize_selected_game_dates(
+        selected_game_dates, player_name
+    )
+    if selected_dates is not None:
+        normalized_dates = pd.to_datetime(
+            games_df["date"], errors="coerce"
+        ).dt.normalize()
+        games_df = games_df.loc[normalized_dates.isin(selected_dates)].copy()
     print(
-        f"Future Games Found: "
-        f"{len(games_df)}"
+        f"Current Team: {team} | scheduled={scheduled_games_count} | "
+        f"selected={len(games_df)}"
     )
-
     prepared_games = []
-
     for _, game in games_df.iterrows():
-
-        weighted_df = (
-            apply_single_game_weight(
-                player_df,
-                game
-            )
-        )
-
+        weighted_df = apply_single_game_weight(player_df, game)
         prepared_games.append({
             "date": game["date"],
             "opponent": game["opponent"],
             "home_away": game["home_away"],
-            "weighted_df": weighted_df
+            "weighted_df": weighted_df,
         })
-
     return {
         "player": player_name,
         "team": team,
-        "games": prepared_games
+        "status": player_df.attrs.get("yahoo_status"),
+        "scheduled_games_count": scheduled_games_count,
+        "active_games_count": len(prepared_games),
+        "games": prepared_games,
     }
 
-# ============================================================
-# 8. PREPARE ROSTER
-# ============================================================
 
 def prepare_roster_simulation(
     roster,
     schedule_df,
     start_date,
-    end_date
+    end_date,
+    selected_game_dates=None,
 ):
-
     prepared_roster = {}
-
-    for (
-        player_name,
-        player_df
-    ) in roster.items():
-
+    for player_name, player_df in roster.items():
         print("\n" + "=" * 80)
         print(f"Preparing roster player: {player_name}")
-
         if hasattr(player_df, "shape"):
-            print(
-                f"shape = {player_df.shape}"
-            )
-
-        prepared_roster[
-            player_name
-        ] = (
-            prepare_player_simulation(
-                player_name,
-                player_df,
-                schedule_df,
-                start_date,
-                end_date
-            )
+            print(f"shape = {player_df.shape}")
+        prepared_roster[player_name] = prepare_player_simulation(
+            player_name=player_name,
+            player_df=player_df,
+            schedule_df=schedule_df,
+            start_date=start_date,
+            end_date=end_date,
+            selected_game_dates=selected_game_dates,
         )
-
     return prepared_roster
-
 
 # ============================================================
 # 9. VECTORIZED PLAYER SIMULATION
@@ -2469,6 +2540,55 @@ def create_add_drop_roster(
     )
     return result
 
+def calculate_expected_player_production(prepared_roster):
+    """Expected remaining-matchup production from the existing weighted pools."""
+    raw_stats = [
+        "FGM", "FGA", "FTM", "FTA", "3PM",
+        "Pts", "Reb", "Ast", "Stl", "Blk", "TO",
+    ]
+    rows = []
+    for player_name, prepared_player in prepared_roster.items():
+        totals = {stat: 0.0 for stat in raw_stats}
+        for game_info in prepared_player.get("games", []):
+            weighted_df = game_info.get("weighted_df")
+            if (
+                weighted_df is None
+                or not isinstance(weighted_df, pd.DataFrame)
+                or weighted_df.empty
+                or "Weight" not in weighted_df.columns
+            ):
+                continue
+            weights = pd.to_numeric(
+                weighted_df["Weight"], errors="coerce"
+            ).fillna(0.0)
+            weight_sum = float(weights.sum())
+            if weight_sum <= 0:
+                continue
+            weights = weights / weight_sum
+            weight_array = weights.to_numpy(dtype=float)
+            for stat in raw_stats:
+                if stat not in weighted_df.columns:
+                    continue
+                values = pd.to_numeric(
+                    weighted_df[stat], errors="coerce"
+                ).fillna(0.0).to_numpy(dtype=float)
+                totals[stat] += float(np.sum(values * weight_array))
+        row = {
+            "Player": player_name,
+            "Scheduled Games": int(prepared_player.get("scheduled_games_count", len(prepared_player.get("games", [])))),
+            "Active Games": int(prepared_player.get("active_games_count", len(prepared_player.get("games", [])))),
+            **totals,
+        }
+        row["FG%"] = totals["FGM"] / totals["FGA"] if totals["FGA"] > 0 else 0.0
+        row["FT%"] = totals["FTM"] / totals["FTA"] if totals["FTA"] > 0 else 0.0
+        rows.append(row)
+    columns = [
+        "Player", "Scheduled Games", "Active Games", "FG%", "FT%", "3PM", "Pts", "Reb", "Ast", "Stl", "Blk", "TO",
+        "FGM", "FGA", "FTM", "FTA",
+    ]
+    return pd.DataFrame(rows, columns=columns)
+
+
 def create_add_drop_heatmap(
     category_comparison,
     prepared_baseline
@@ -3166,7 +3286,9 @@ def compare_add_drop_fast(
     seasons=SEASONS,
     n_sim=3000,
     random_seed=12345,
-    yahoo_league_key=None
+    yahoo_league_key=None,
+    my_selected_games=None,
+    opp_selected_games=None,
 ):
 
     # ========================================================
@@ -3206,7 +3328,8 @@ def compare_add_drop_fast(
         roster=baseline_roster,
         schedule_df=schedule_df,
         start_date=start_date,
-        end_date=end_date
+        end_date=end_date,
+        selected_game_dates=my_selected_games,
     )
 
     # ========================================================
@@ -3221,7 +3344,8 @@ def compare_add_drop_fast(
         roster=scenario_roster,
         schedule_df=schedule_df,
         start_date=start_date,
-        end_date=end_date
+        end_date=end_date,
+        selected_game_dates=my_selected_games,
     )
 
     # ========================================================
@@ -3236,7 +3360,8 @@ def compare_add_drop_fast(
         roster=opp_roster,
         schedule_df=schedule_df,
         start_date=start_date,
-        end_date=end_date
+        end_date=end_date,
+        selected_game_dates=opp_selected_games,
     )
 
     # ========================================================
@@ -3562,6 +3687,9 @@ def compare_add_drop_fast(
         category_comparison=comparison_df,
         prepared_baseline=prepared_baseline
     )
+    expected_player_production = calculate_expected_player_production(
+        prepared_baseline
+    )
 
     # ========================================================
     # MONTE CARLO INSPECTION SAMPLES
@@ -3727,6 +3855,7 @@ def compare_add_drop_fast(
         "prepared_scenario": prepared_scenario,
         "prepared_opp": prepared_opp,
         "heatmap_fig": heatmap_fig,
+        "expected_player_production": expected_player_production,
         "baseline_debug": baseline_debug,
         "opp_debug": opp_debug,
         "scenario_debug": scenario_debug

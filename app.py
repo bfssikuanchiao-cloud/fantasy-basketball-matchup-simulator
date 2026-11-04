@@ -1,5 +1,4 @@
 from pathlib import Path
-import re
 import pandas as pd
 import streamlit as st
 import matplotlib.pyplot as plt
@@ -9,6 +8,7 @@ import seaborn as sns
 from fantasy_engine import (
     SEASONS,
     load_yahoo_matchup_context,
+    select_yahoo_league_matchup,
     build_yahoo_historical_rosters,
     get_yahoo_authorization_url,
     exchange_yahoo_verifier,
@@ -74,8 +74,6 @@ DEFAULT_STATE = {
     "my_roster_data": None,
     "opp_roster_data": None,
     "rosters_loaded": False,
-    "my_paste_text": "",
-    "opp_paste_text": "",
     "last_result": None,
     "last_scenario_message": None,
     "yahoo_context": None,
@@ -86,6 +84,12 @@ DEFAULT_STATE = {
     "yahoo_current_totals_loaded": False,
     "yahoo_matchup_loaded": False,
     "yahoo_history_loaded": False,
+    "selected_my_team_key": None,
+    "selected_opp_team_key": None,
+    "my_game_selection": {},
+    "opp_game_selection": {},
+    "game_selection_signature": None,
+    "game_selection_fingerprint": None,
 }
 
 for key, default_value in DEFAULT_STATE.items():
@@ -103,6 +107,10 @@ def invalidate_loaded_rosters():
     st.session_state.my_roster_data = None
     st.session_state.opp_roster_data = None
     st.session_state.rosters_loaded = False
+    st.session_state.my_game_selection = {}
+    st.session_state.opp_game_selection = {}
+    st.session_state.game_selection_signature = None
+    st.session_state.game_selection_fingerprint = None
 
 
 def roster_to_dataframe(team_list, yahoo_players=None):
@@ -136,183 +144,92 @@ def yahoo_roster_metadata(team_key):
     return []
 
 
-ROSTER_SLOTS = {
-    "PG", "SG", "SF", "PF", "C", "G", "F", "UTIL", "UTL",
-    "BN", "BENCH", "IL", "IL+", "IR", "IR+"
-}
-
-NOISE_EXACT = {
-    "PLAYER NOTE", "NEW PLAYER NOTE", "NO NEW PLAYER NOTES",
-    "EDIT ROSTER", "START ACTIVE PLAYERS", "BENCH",
-}
-
-TEAM_DETAIL_PATTERN = re.compile(
-    r"^[A-Z]{2,3}\s*-\s*(?:PG|SG|SF|PF|C|G|F)(?:\s*,\s*(?:PG|SG|SF|PF|C|G|F))*$",
-    re.IGNORECASE,
-)
-
-GAME_TIME_PATTERN = re.compile(
-    r"^(?:\d{1,2}:\d{2}\s*(?:am|pm)|@\s*[A-Z]{2,3}|vs\.?\s*[A-Z]{2,3})",
-    re.IGNORECASE,
-)
-
-STATUS_PATTERN = re.compile(r"^(?:Q|O|DTD|GTD|INJ|SUSP|NA)$", re.IGNORECASE)
-URL_PATTERN = re.compile(r"https?://", re.IGNORECASE)
-
-
-def is_probable_player_name(line):
-    text = line.strip()
-    upper = text.upper()
-
-    if not text or upper in ROSTER_SLOTS or upper in NOISE_EXACT:
-        return False
-    if URL_PATTERN.search(text):
-        return False
-    if TEAM_DETAIL_PATTERN.match(text):
-        return False
-    if GAME_TIME_PATTERN.match(text):
-        return False
-    if STATUS_PATTERN.match(text):
-        return False
-    if "PLAYER NOTE" in upper or "FANTASY" in upper:
-        return False
-    if re.search(r"\d", text):
-        return False
-
-    # NBA player names are generally two to five alphabetic name parts.
-    parts = text.replace("'", "").replace("-", " ").split()
-    if not 2 <= len(parts) <= 5:
-        return False
-    if not all(part.replace(".", "").isalpha() for part in parts):
-        return False
-
-    return True
-
-
-def parse_roster_text(raw_text):
-    """Parse either one-player-per-line text or copied Yahoo roster text."""
-    raw_lines = [line.strip() for line in raw_text.splitlines() if line.strip()]
-
-    # Also support comma-separated player names when no Yahoo slot structure exists.
-    if len(raw_lines) == 1 and "," in raw_lines[0]:
-        raw_lines = [item.strip() for item in raw_lines[0].split(",") if item.strip()]
-
-    players = []
-    seen = set()
-    waiting_for_player = False
-
-    for line in raw_lines:
-        upper = line.upper().rstrip(":")
-
-        if upper in ROSTER_SLOTS:
-            waiting_for_player = True
-            continue
-
-        if waiting_for_player:
-            if is_probable_player_name(line):
-                player = clean_player_name(line)
-                if player not in seen:
-                    players.append(player)
-                    seen.add(player)
-                waiting_for_player = False
-            continue
-
-        # Simple mode: permit clean one-player-per-line lists.
-        if is_probable_player_name(line):
-            player = clean_player_name(line)
-            if player not in seen:
-                players.append(player)
-                seen.add(player)
-
-    return players
-
-
-def load_yahoo_matchup_light(league_input):
-    return load_yahoo_matchup_context(league_input)
-
-
-def load_yahoo_history(context, seasons_tuple):
-    return build_yahoo_historical_rosters(
-        context=context,
-        seasons=seasons_tuple,
-    )
-
-def apply_pasted_roster(text_key, team_key, other_team_key):
-    parsed_players = parse_roster_text(st.session_state[text_key])
-
-    if not parsed_players:
-        st.warning(
-            "沒有辨識到球員。請嘗試每行只放一名球員，或保留 Yahoo roster 的位置與球員名稱。"
-        )
+def synchronize_selected_matchup(selected_my_key, selected_opp_key):
+    context = st.session_state.get("yahoo_context")
+    if not isinstance(context, dict):
         return
-
-    other_team = set(st.session_state[other_team_key])
-    duplicates = [player for player in parsed_players if player in other_team]
-    accepted = [player for player in parsed_players if player not in other_team]
-
-    st.session_state[team_key] = accepted
-    invalidate_loaded_rosters()
-
-    if duplicates:
-        st.warning(
-            "下列球員已在另一支球隊，因此未匯入：" + ", ".join(duplicates)
+    if selected_my_key == selected_opp_key:
+        st.warning("本陣與敵陣必須選擇不同隊伍。")
+        return
+    if (
+        selected_my_key == context.get("my_team_key")
+        and selected_opp_key == context.get("opponent_team_key")
+    ):
+        return
+    with st.spinner("正在切換 matchup、載入雙方陣容與本週累積數據..."):
+        selected = select_yahoo_league_matchup(
+            context,
+            selected_my_key,
+            selected_opp_key,
         )
-
-    st.success(f"成功匯入 {len(accepted)} 名球員。")
+    st.session_state.yahoo_context = selected
+    st.session_state.my_team = [
+        player["name"] for player in selected["my_roster"]
+    ]
+    st.session_state.opp_team = [
+        player["name"] for player in selected["opponent_roster"]
+    ]
+    current_stat_fields = [
+        "FGA", "FGM", "FTA", "FTM", "3PM",
+        "Pts", "Reb", "Ast", "Stl", "Blk", "TO",
+    ]
+    for stat in current_stat_fields:
+        st.session_state[f"current_my_{stat}"] = int(
+            selected["current_my"].get(stat, 0)
+        )
+        st.session_state[f"current_opp_{stat}"] = int(
+            selected["current_opp"].get(stat, 0)
+        )
+    invalidate_loaded_rosters()
+    st.session_state.yahoo_history_loaded = False
+    st.session_state.yahoo_current_totals_loaded = True
+    st.session_state.last_result = None
+    st.session_state.last_scenario_message = None
     st.rerun()
 
 
-def show_paste_team(team_key, title, text_key, other_team_key):
+def show_team_editor(team_key, title):
     team = st.session_state[team_key]
     st.subheader(f"{title} ({len(team)})")
-
-    st.text_area(
-        f"Paste {title}",
-        key=text_key,
-        height=280,
-        placeholder=(
-            "可貼 Yahoo roster，例如：\n"
-            "SG\nKobe Bryant\nLAL - SG\n"
-            "C\nShaquille O'Neal\nLAL - C\n\n"
-            "也可以每行只貼一名球員。"
-        ),
-    )
-
-    import_col, erase_col, clear_col = st.columns(3)
-
-    with import_col:
-        if st.button(
-            f"Import {title}",
-            key=f"import_{team_key}",
-            type="primary",
-            use_container_width=True,
-        ):
-            apply_pasted_roster(text_key, team_key, other_team_key)
-
-    with erase_col:
+    select_col, erase_col, clear_col = st.columns([1.35, 1, 1])
+    remove_player = None
+    with select_col:
         if team:
             remove_player = st.selectbox(
-                "Erase player",
+                "選擇球員",
                 options=team,
                 key=f"remove_select_{team_key}",
                 label_visibility="collapsed",
             )
-            if st.button(
-                "Erase Selected",
-                key=f"erase_selected_{team_key}",
-                use_container_width=True,
-            ):
-                st.session_state[team_key].remove(remove_player)
-                invalidate_loaded_rosters()
-                st.rerun()
         else:
-            st.button(
-                "Erase Selected",
-                key=f"erase_disabled_{team_key}",
+            st.selectbox(
+                "選擇球員",
+                options=["目前沒有球員"],
+                key=f"remove_empty_{team_key}",
                 disabled=True,
-                use_container_width=True,
+                label_visibility="collapsed",
             )
-
+    with erase_col:
+        if st.button(
+            "Erase Selected",
+            key=f"erase_selected_{team_key}",
+            disabled=not bool(team),
+            use_container_width=True,
+        ):
+            st.session_state[team_key].remove(remove_player)
+            context = st.session_state.get("yahoo_context")
+            if isinstance(context, dict):
+                roster_field = (
+                    "my_roster" if team_key == "my_team" else "opponent_roster"
+                )
+                context[roster_field] = [
+                    player for player in context.get(roster_field, [])
+                    if player.get("name") != remove_player
+                ]
+            invalidate_loaded_rosters()
+            st.session_state.yahoo_history_loaded = False
+            st.session_state.last_result = None
+            st.rerun()
     with clear_col:
         if st.button(
             f"Clear {title}",
@@ -321,10 +238,16 @@ def show_paste_team(team_key, title, text_key, other_team_key):
             use_container_width=True,
         ):
             st.session_state[team_key] = []
-            st.session_state[text_key] = ""
+            context = st.session_state.get("yahoo_context")
+            if isinstance(context, dict):
+                roster_field = (
+                    "my_roster" if team_key == "my_team" else "opponent_roster"
+                )
+                context[roster_field] = []
             invalidate_loaded_rosters()
+            st.session_state.yahoo_history_loaded = False
+            st.session_state.last_result = None
             st.rerun()
-
     st.markdown(f"#### 目前 {title}")
     if team:
         st.dataframe(
@@ -333,7 +256,195 @@ def show_paste_team(team_key, title, text_key, other_team_key):
             use_container_width=True,
         )
     else:
-        st.info(f"{title} 目前尚未匯入球員。")
+        st.info(f"{title} 目前沒有球員。")
+
+def yahoo_injury_designation(player):
+    """Display Yahoo's raw player injury designation; healthy players are blank."""
+    return str(player.get("status") or "").strip().upper()
+
+
+def injury_default_enabled(player):
+    """Keep the existing safe default behavior while displaying Yahoo's raw code."""
+    raw_status = yahoo_injury_designation(player)
+    slot = str(player.get("selected_position") or "").strip().upper()
+    if slot in {"IL", "IL+", "IR", "IR+"}:
+        return False
+    return raw_status not in {"O", "OUT", "INJ", "IL", "IL+", "IR", "IR+"}
+
+
+def build_game_matrix(players, schedule_df, start_date, end_date, selection):
+    """Build one row per player with a Play/Game pair for every date."""
+    schedule = schedule_df.copy()
+    schedule["date"] = pd.to_datetime(schedule["date"], errors="coerce")
+    start_ts = pd.Timestamp(start_date).normalize()
+    end_ts = pd.Timestamp(end_date).normalize()
+    date_range = list(pd.date_range(start_ts, end_ts, freq="D"))
+
+    rows = []
+    game_lookup = {}
+    for player in players:
+        name = player.get("name")
+        team = str(player.get("team") or "").upper()
+        if not name or not team:
+            continue
+
+        games = schedule.loc[
+            schedule["team"].astype(str).str.upper().eq(team)
+            & schedule["date"].between(start_ts, end_ts)
+        ].sort_values("date")
+        game_by_date = {
+            pd.Timestamp(game["date"]).normalize(): game
+            for _, game in games.iterrows()
+        }
+        default_enabled = injury_default_enabled(player)
+        player_selection = selection.setdefault(name, {})
+
+        row = {
+            "Player": name,
+            "Team": team,
+            "Pos": player.get("selected_position") or "",
+            "Injury": yahoo_injury_designation(player),
+            "G": len(games),
+            "G#": 0,
+        }
+
+        for game_date in date_range:
+            date_label = f"{game_date.strftime('%a')} {game_date.month}/{game_date.day}"
+            play_col = f"{date_label} ✓"
+            game_col = f"{date_label} Game"
+            game = game_by_date.get(game_date)
+
+            # No game means no control. None renders as a blank cell instead of
+            # suggesting that an unavailable game can be selected.
+            if game is None:
+                row[play_col] = None
+                row[game_col] = ""
+                continue
+
+            date_key = game_date.strftime("%Y-%m-%d")
+            if date_key not in player_selection:
+                player_selection[date_key] = default_enabled
+            away = str(game.get("home_away", "")).strip().lower() == "away"
+            opponent = str(game.get("opponent", "")).upper()
+            enabled = bool(player_selection[date_key])
+            row[play_col] = enabled
+            row[game_col] = f"@{opponent}" if away else opponent
+            row["G#"] += int(enabled)
+            game_lookup[(name, play_col)] = date_key
+
+        rows.append(row)
+
+    base_columns = ["Player", "Team", "Pos", "Injury", "G", "G#"]
+    date_columns = []
+    for game_date in date_range:
+        date_label = f"{game_date.strftime('%a')} {game_date.month}/{game_date.day}"
+        date_columns.extend([f"{date_label} ✓", f"{date_label} Game"])
+
+    return pd.DataFrame(rows, columns=base_columns + date_columns), game_lookup, date_range
+
+
+def render_game_selector(label, side_key, players, schedule_df, start_date, end_date):
+    selection_key = f"{side_key}_game_selection"
+    selection = st.session_state[selection_key]
+    matrix, game_lookup, date_range = build_game_matrix(
+        players, schedule_df, start_date, end_date, selection
+    )
+
+    st.markdown(f"#### {label}")
+    button_cols = st.columns(3)
+    if button_cols[0].button("Select All Games", key=f"select_all_{side_key}", use_container_width=True):
+        for player_dates in selection.values():
+            for date_key in player_dates:
+                player_dates[date_key] = True
+        st.session_state.last_result = None
+        st.rerun()
+    if button_cols[1].button("Clear All Games", key=f"clear_all_{side_key}", use_container_width=True):
+        for player_dates in selection.values():
+            for date_key in player_dates:
+                player_dates[date_key] = False
+        st.session_state.last_result = None
+        st.rerun()
+    if button_cols[2].button("Restore Injury Defaults", key=f"injury_defaults_{side_key}", use_container_width=True):
+        player_by_name = {player.get("name"): player for player in players}
+        for player_name, player_dates in selection.items():
+            enabled = injury_default_enabled(player_by_name.get(player_name, {}))
+            for date_key in player_dates:
+                player_dates[date_key] = enabled
+        st.session_state.last_result = None
+        st.rerun()
+
+    if matrix.empty:
+        st.info("此日期範圍沒有可選賽程。")
+        return selection
+
+    play_columns = [column for column in matrix.columns if column.endswith(" ✓")]
+    game_columns = [column for column in matrix.columns if column.endswith(" Game")]
+    existing_game_cells = set(game_lookup)
+
+    column_config = {
+        "Player": st.column_config.TextColumn("Player", width="medium"),
+        "Team": st.column_config.TextColumn("Team", width="small"),
+        "Pos": st.column_config.TextColumn("Pos", width="small"),
+        "Injury": st.column_config.TextColumn(
+            "Injury", width="small", help="Yahoo player injury designation; blank means Yahoo has no injury designation."
+        ),
+        "G": st.column_config.NumberColumn("G", width="small"),
+        "G#": st.column_config.NumberColumn("G#", width="small"),
+    }
+    for play_col in play_columns:
+        column_config[play_col] = st.column_config.CheckboxColumn(
+            play_col,
+            help="Only scheduled games can be selected for Monte Carlo.",
+            width="small",
+        )
+    for game_col in game_columns:
+        column_config[game_col] = st.column_config.TextColumn(game_col, width="small")
+
+    editor_key = f"game_matrix_{side_key}_{pd.Timestamp(start_date):%Y%m%d}_{pd.Timestamp(end_date):%Y%m%d}"
+    edited = st.data_editor(
+        matrix,
+        key=editor_key,
+        hide_index=True,
+        use_container_width=True,
+        height=min(650, 38 * (len(matrix) + 2)),
+        disabled=["Player", "Team", "Pos", "Injury", "G", "G#"] + game_columns,
+        column_config=column_config,
+    )
+
+    # Only actual games are persisted. Blank Game cells have no game_lookup
+    # entry, so even if a browser renders a null checkbox affordance it can
+    # never become an active simulation game.
+    for row_index, original in matrix.reset_index(drop=True).iterrows():
+        player_name = original["Player"]
+        for play_col in play_columns:
+            lookup_key = (player_name, play_col)
+            if lookup_key not in existing_game_cells:
+                continue
+            date_key = game_lookup[lookup_key]
+            selection.setdefault(player_name, {})[date_key] = bool(
+                edited.iloc[row_index][play_col]
+            )
+
+    daily_parts = []
+    for game_date in date_range:
+        date_label = f"{game_date.strftime('%a')} {game_date.month}/{game_date.day}"
+        play_col = f"{date_label} ✓"
+        scheduled = sum(
+            1 for player_name in matrix["Player"]
+            if (player_name, play_col) in existing_game_cells
+        )
+        selected = sum(
+            int(selection.get(player_name, {}).get(game_lookup[(player_name, play_col)], False))
+            for player_name in matrix["Player"]
+            if (player_name, play_col) in existing_game_cells
+        )
+        daily_parts.append(f"{date_label}: {selected}/{scheduled}")
+
+    st.caption("Daily selected / scheduled player-games: " + "  |  ".join(daily_parts))
+    st.caption(
+        "@XXX = away game; XXX = home game. Injury shows Yahoo's designation (Q / D / O etc.); blank means no Yahoo injury designation."
+    )
+    return selection
 
 # ============================================================
 # YAHOO AUTHORIZATION + MATCHUP AUTO LOAD
@@ -379,22 +490,26 @@ else:
             st.session_state.yahoo_matchup_loaded = False
             st.session_state.yahoo_history_loaded = False
             st.session_state.yahoo_current_totals_loaded = False
+            st.session_state.selected_my_team_key = None
+            st.session_state.selected_opp_team_key = None
             invalidate_loaded_rosters()
             st.rerun()
     if st.button(
-        "1. 載入目前 Yahoo Matchup",
+        "1. 載入 Yahoo League",
         type="primary",
         use_container_width=True,
         disabled=not bool(league_input.strip()),
     ):
         try:
-            with st.spinner("正在載入 matchup、雙方 rosters 與目前累積數據..."):
-                yc = load_yahoo_matchup_light(league_input.strip())
+            with st.spinner("正在載入 League teams、預設 matchup、雙方 rosters 與目前累積數據..."):
+                yc = load_yahoo_matchup_context(league_input.strip())
 
             st.session_state.yahoo_context = yc
             st.session_state.yahoo_loaded = True
             st.session_state.yahoo_matchup_loaded = True
             st.session_state.yahoo_history_loaded = False
+            st.session_state.selected_my_team_key = yc["my_team_key"]
+            st.session_state.selected_opp_team_key = yc["opponent_team_key"]
             st.session_state.my_team = [
                 player["name"] for player in yc["my_roster"]
             ]
@@ -427,7 +542,7 @@ else:
             st.exception(error)
 
     if st.session_state.yahoo_matchup_loaded:
-        st.success("Matchup、雙方陣容與目前累積數據已載入。")
+        st.success("Yahoo League、預設 matchup、雙方陣容與目前累積數據已載入。")
 
         history_button_label = (
             "2. 重新載入雙方球員歷史資料"
@@ -442,12 +557,12 @@ else:
         ):
             try:
                 with st.spinner(
-                    "正在載入 2018-19 至 2026-27 歷史資料；"
+                    "正在載入 2022-23 至 2026-27 歷史資料；"
                     "已快取資料會直接讀取，只補齊缺少部分..."
                 ):
-                    historical = load_yahoo_history(
+                    historical = build_yahoo_historical_rosters(
                         st.session_state.yahoo_context,
-                        tuple(SEASONS),
+                        seasons=tuple(SEASONS),
                     )
 
                 st.session_state.my_roster_data = (
@@ -471,31 +586,59 @@ if st.session_state.yahoo_loaded and st.session_state.yahoo_context:
     st.info(f"已連接 League {yc['public_league_id']} | API key: {yc['league_key']} | Week {yc['current_week']}")
 
 # ============================================================
-# PASTE ROSTERS
+# LEAGUE MATCHUP SELECTOR + ROSTER EDITOR
 # ============================================================
 st.divider()
-st.header("輸入球員陣容")
+st.header("Matchup 雙方陣容")
 st.caption(
-    "可直接貼 Yahoo Roster，也可以使用每行一名球員的簡單格式。匯入會取代該隊目前名單。"
+    "從 Yahoo League 選擇任意兩支隊伍。切換隊伍後會更新 roster 與本週累積數據，"
+    "並清除舊的 historical roster，避免沿用上一組 matchup。"
 )
+context = st.session_state.get("yahoo_context")
+if isinstance(context, dict) and context.get("league_teams"):
+    league_teams = context["league_teams"]
+    team_name_by_key = {
+        team["team_key"]: team["name"] for team in league_teams
+    }
+    team_keys = list(team_name_by_key)
+    if st.session_state.selected_my_team_key not in team_keys:
+        st.session_state.selected_my_team_key = context.get("my_team_key")
+    if st.session_state.selected_opp_team_key not in team_keys:
+        st.session_state.selected_opp_team_key = context.get("opponent_team_key")
 
-my_col, opp_col = st.columns(2)
+    matchup_left, vs_col, matchup_right = st.columns([4, 0.7, 4])
+    with matchup_left:
+        selected_my_key = st.selectbox(
+            "本陣",
+            options=team_keys,
+            format_func=lambda key: team_name_by_key[key],
+            key="selected_my_team_key",
+        )
+    with vs_col:
+        st.markdown("<div style='text-align:center;padding-top:2rem;font-weight:700;'>VS</div>", unsafe_allow_html=True)
+    with matchup_right:
+        selected_opp_key = st.selectbox(
+            "敵陣",
+            options=team_keys,
+            format_func=lambda key: team_name_by_key[key],
+            key="selected_opp_team_key",
+        )
 
-with my_col:
-    show_paste_team(
-        team_key="my_team",
-        title="本陣",
-        text_key="my_paste_text",
-        other_team_key="opp_team",
-    )
+    if selected_my_key == selected_opp_key:
+        st.warning("本陣與敵陣不能選擇同一支 Yahoo Team。")
+    elif (
+        selected_my_key != context.get("my_team_key")
+        or selected_opp_key != context.get("opponent_team_key")
+    ):
+        synchronize_selected_matchup(selected_my_key, selected_opp_key)
 
-with opp_col:
-    show_paste_team(
-        team_key="opp_team",
-        title="敵陣",
-        text_key="opp_paste_text",
-        other_team_key="my_team",
-    )
+    my_col, opp_col = st.columns(2)
+    with my_col:
+        show_team_editor("my_team", "本陣")
+    with opp_col:
+        show_team_editor("opp_team", "敵陣")
+else:
+    st.info("請先完成 Yahoo 授權並載入 League。")
 
 # ============================================================
 # ROSTER SUMMARY
@@ -579,7 +722,7 @@ if st.session_state.rosters_loaded:
 elif st.session_state.yahoo_matchup_loaded:
     st.info("Matchup 已載入；請按「2. 載入雙方球員歷史資料」以啟用模擬。")
 else:
-    st.info("請先連接 Yahoo 並載入目前 Matchup。")
+    st.info("請先連接 Yahoo 並載入 League。")
 
 # ============================================================
 # MATCHUP SETTINGS
@@ -599,6 +742,47 @@ with sim_col:
         value=3000,
         step=100,
     )
+
+st.markdown("### Scheduled Games Selection")
+st.caption(
+    "依所選日期與球員目前球隊列出賽程。只有勾選的 player-games 會進入 Monte Carlo；"
+    "Yahoo Injury 狀態只作參考與初始預設。"
+)
+if SCHEDULE_PATH.exists() and isinstance(st.session_state.get("yahoo_context"), dict):
+    selection_schedule = load_schedule(str(SCHEDULE_PATH))
+    context = st.session_state.yahoo_context
+    signature = (
+        str(start_date), str(end_date),
+        context.get("my_team_key"), context.get("opponent_team_key"),
+        tuple(st.session_state.my_team), tuple(st.session_state.opp_team),
+    )
+    if st.session_state.game_selection_signature != signature:
+        st.session_state.my_game_selection = {}
+        st.session_state.opp_game_selection = {}
+        st.session_state.game_selection_signature = signature
+        st.session_state.last_result = None
+    game_tab_my, game_tab_opp = st.tabs(["本陣賽程", "敵陣賽程"])
+    with game_tab_my:
+        my_selected_games = render_game_selector(
+            "本陣", "my", context.get("my_roster", []),
+            selection_schedule, start_date, end_date,
+        )
+    with game_tab_opp:
+        opp_selected_games = render_game_selector(
+            "敵陣", "opp", context.get("opponent_roster", []),
+            selection_schedule, start_date, end_date,
+        )
+    fingerprint = repr((my_selected_games, opp_selected_games))
+    if (
+        st.session_state.game_selection_fingerprint is not None
+        and st.session_state.game_selection_fingerprint != fingerprint
+    ):
+        st.session_state.last_result = None
+    st.session_state.game_selection_fingerprint = fingerprint
+else:
+    my_selected_games = {}
+    opp_selected_games = {}
+    st.info("載入 Yahoo League 後會顯示雙方球員賽程選擇。")
 
 st.markdown("### 當前各項累積數據")
 st.caption("Yahoo 載入後會自動填入目前累積值；FG% 與 FT% 由 FGM/FGA、FTM/FTA 計算。")
@@ -649,7 +833,7 @@ with scenario_col2:
         )
     else:
         drop_player = ""
-        st.info("請先匯入 My Team。")
+        st.info("請先選擇並載入本陣。")
 
 
 # ============================================================
@@ -755,6 +939,8 @@ if run_scenario:
                     n_sim=int(n_sim),
                     random_seed=12345,
                     yahoo_league_key=st.session_state.yahoo_context["league_key"],
+                    my_selected_games=st.session_state.my_game_selection,
+                    opp_selected_games=st.session_state.opp_game_selection,
                 )
 
             # Only replace the saved result after a successful run.
@@ -847,7 +1033,7 @@ if st.session_state.last_result is not None:
     # ========================================================
 
     st.markdown(
-        "### Category Win Probability Comparison"
+        "### 各項目 勝率變化"
     )
 
     category_display = (
@@ -894,11 +1080,89 @@ if st.session_state.last_result is not None:
     )
 
     # ========================================================
+    # EXPECTED PLAYER PRODUCTION
+    # ========================================================
+    st.markdown("### 預估球員各項目輸出")
+
+    production_view = st.radio(
+        "Production View",
+        options=["Matchup Total", "Per Game Average"],
+        horizontal=True,
+        key="expected_production_view",
+        label_visibility="collapsed",
+    )
+
+    if production_view == "Per Game Average":
+        st.caption(
+            "Average projected per-game production across all simulations for the remaining matchup."
+        )
+    else:
+        st.caption(
+            "Average projected total production across all simulations for the remaining matchup."
+        )
+
+    expected_production = result.get("expected_player_production")
+    if expected_production is not None and not expected_production.empty:
+        production_display = expected_production[
+            ["Player", "Scheduled Games", "Active Games", "FG%", "FT%", "3PM", "Pts", "Reb", "Ast", "Stl", "Blk", "TO"]
+        ].copy()
+
+        counting_columns = ["3PM", "Pts", "Reb", "Ast", "Stl", "Blk", "TO"]
+        if production_view == "Per Game Average":
+            active_games = pd.to_numeric(
+                production_display["Active Games"], errors="coerce"
+            ).fillna(0)
+            safe_active_games = active_games.where(active_games > 0)
+            production_display[counting_columns] = (
+                production_display[counting_columns]
+                .div(safe_active_games, axis=0)
+                .fillna(0.0)
+            )
+
+        # Shooting percentages are ratios and never divided by Active Games.
+        production_display["FG%"] = (production_display["FG%"] * 100).round(1)
+        production_display["FT%"] = (production_display["FT%"] * 100).round(1)
+        for column in counting_columns:
+            production_display[column] = production_display[column].round(2)
+
+        st.dataframe(
+            production_display,
+            hide_index=True,
+            use_container_width=True,
+        )
+
+        with st.expander("Show Shooting Volume Details", expanded=False):
+            shooting_display = expected_production[
+                ["Player", "FGM", "FGA", "FTM", "FTA", "Active Games"]
+            ].copy()
+            shooting_columns = ["FGM", "FGA", "FTM", "FTA"]
+            if production_view == "Per Game Average":
+                active_games = pd.to_numeric(
+                    shooting_display["Active Games"], errors="coerce"
+                ).fillna(0)
+                safe_active_games = active_games.where(active_games > 0)
+                shooting_display[shooting_columns] = (
+                    shooting_display[shooting_columns]
+                    .div(safe_active_games, axis=0)
+                    .fillna(0.0)
+                )
+            shooting_display = shooting_display.drop(columns=["Active Games"])
+            for column in shooting_columns:
+                shooting_display[column] = shooting_display[column].round(2)
+            st.dataframe(
+                shooting_display,
+                hide_index=True,
+                use_container_width=True,
+            )
+    else:
+        st.info("Expected player production was not generated.")
+
+    # ========================================================
     # OVERALL TABLE
     # ========================================================
 
     st.markdown(
-        "### Matchup Target Probability"
+        "### 得到N分以上的機率"
     )
 
     overall_display = (
@@ -927,7 +1191,7 @@ if st.session_state.last_result is not None:
     # ========================================================
 
     st.markdown(
-        "### H2H Score Distribution"
+        "### H2H 得分機率分佈"
     )
 
     score_dist = result.get(
@@ -1086,7 +1350,7 @@ if st.session_state.last_result is not None:
     # ========================================================
 
     st.markdown(
-        "### Monte Carlo Heatmap Analysis"
+        "### 蒙地卡羅熱圖分析"
     )
 
     heatmap_fig = result.get(
