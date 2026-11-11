@@ -797,16 +797,39 @@ def download_yahoo_player_season(
         .unique()
     )
 
-    pending_dates = [
+    # Current season uses two complementary freshness rules:
+    # 1. Every never-checked date is fetched, so a long gap between app runs
+    #    cannot create a hole in the season.
+    # 2. Candidate dates in the most recent 14 calendar days are fetched again
+    #    even when already checked, allowing delayed Yahoo updates/corrections
+    #    to replace the cached row for that date.
+    # Completed seasons keep their permanent-cache behavior above.
+    refresh_days = 14
+    refresh_start = end_date - timedelta(days=refresh_days - 1)
+
+    never_checked_dates = {
         pd.Timestamp(value).normalize()
         for value in candidate_dates
         if pd.Timestamp(value).normalize() not in checked_dates
-    ]
+    }
+    rolling_refresh_dates = (
+        {
+            pd.Timestamp(value).normalize()
+            for value in candidate_dates
+            if pd.Timestamp(value).date() >= refresh_start
+        }
+        if season == CURRENT_SEASON
+        else set()
+    )
+    pending_dates = sorted(never_checked_dates | rolling_refresh_dates)
 
     print(
         f"[YAHOO_DAILY] {player_name} | {season} | "
         f"trade_safe_dates=yes | games_cached={len(cached)} | "
         f"dates_checked={len(checked_dates)} | "
+        f"never_checked={len(never_checked_dates)} | "
+        f"rolling_refresh_days={refresh_days if season == CURRENT_SEASON else 0} | "
+        f"rolling_refresh_dates={len(rolling_refresh_dates)} | "
         f"pending_dates={len(pending_dates)}"
     )
 

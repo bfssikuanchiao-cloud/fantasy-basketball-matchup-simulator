@@ -242,7 +242,7 @@ def validate_cache(df: pd.DataFrame) -> None:
         )
 
 
-def main() -> None:
+def update_schedule_cache() -> dict:
     checkpoint = load_checkpoint()
     combined = checkpoint.copy()
     failures: list[dict[str, str]] = []
@@ -339,6 +339,21 @@ def main() -> None:
             ["DATE", "SEASON", "GAME_ID", "TEAM", "OPP", "H_A", "IS_HOME"]
         ].tail(12).to_string(index=False)
     )
+
+    return {
+        "output_file": str(OUTPUT_FILE),
+        "rows": int(len(combined)),
+        "current_season": CURRENT_SEASON,
+        "current_season_rows": int(len(current_rows)),
+        "latest_completed_game_date": (
+            None if current_rows.empty else str(current_rows["DATE"].max())
+        ),
+        "failures": failures,
+    }
+
+
+def main() -> None:
+    update_schedule_cache()
 
 
 if __name__ == "__main__":

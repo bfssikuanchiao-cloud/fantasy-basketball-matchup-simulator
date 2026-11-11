@@ -5,6 +5,7 @@ import matplotlib.pyplot as plt
 import matplotlib.ticker as mtick
 import seaborn as sns
 
+from build_nba_schedule_cache_incremental import update_schedule_cache
 from fantasy_engine import (
     SEASONS,
     load_yahoo_matchup_context,
@@ -582,8 +583,26 @@ else:
         ):
             try:
                 with st.spinner(
-                    "正在載入 2022-23 至 2026-27 歷史資料；"
-                    "已快取資料會直接讀取，只補齊缺少部分..."
+                    "步驟 1/2：正在更新 NBA 已完成比賽環境（Opponent / Home / Away）..."
+                ):
+                    schedule_update = update_schedule_cache()
+
+                schedule_failures = schedule_update.get("failures") or []
+                latest_schedule_date = schedule_update.get("latest_completed_game_date")
+                if schedule_failures:
+                    st.warning(
+                        "NBA schedule refresh 未完全成功；已保留並使用原有 schedule cache。"
+                        f"目前 current-season cache 最晚日期：{latest_schedule_date or 'unknown'}。"
+                    )
+                else:
+                    st.success(
+                        "NBA schedule/context 已更新"
+                        + (f"，最新完成比賽日期：{latest_schedule_date}。" if latest_schedule_date else "。")
+                    )
+
+                with st.spinner(
+                    "步驟 2/2：正在載入 2022-23 至 2026-27 Yahoo 球員歷史資料；"
+                    "已完成球季使用永久 cache，current season 補抓未檢查日期並重查最近 14 天..."
                 ):
                     historical = build_yahoo_historical_rosters(
                         st.session_state.yahoo_context,

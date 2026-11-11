@@ -12,6 +12,3 @@ __pycache__/
 # Virtual environment
 .venv/
 venv/
-# Yahoo runtime cache metadata
-yahoo_daily_cache/*_checked_dates.txt
-yahoo_daily_cache/*_zero_cache_repair_v1.done
