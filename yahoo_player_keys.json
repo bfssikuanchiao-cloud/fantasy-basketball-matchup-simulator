@@ -15,6 +15,50 @@
       "team": "HOU",
       "status": "GTD",
       "selected_position": null
+    },
+    "2025-26": {
+      "player_key": "466.p.5727",
+      "player_id": "5727",
+      "name": "Fred VanVleet",
+      "team": "HOU",
+      "status": "GTD",
+      "selected_position": null,
+      "eligible_positions": [
+        "PG"
+      ]
+    },
+    "2024-25": {
+      "player_key": "454.p.5727",
+      "player_id": "5727",
+      "name": "Fred VanVleet",
+      "team": "HOU",
+      "status": null,
+      "selected_position": null,
+      "eligible_positions": [
+        "PG"
+      ]
+    },
+    "2023-24": {
+      "player_key": "428.p.5727",
+      "player_id": "5727",
+      "name": "Fred VanVleet",
+      "team": "HOU",
+      "status": "GTD",
+      "selected_position": null,
+      "eligible_positions": [
+        "PG"
+      ]
+    },
+    "2022-23": {
+      "player_key": "418.p.5727",
+      "player_id": "5727",
+      "name": "Fred VanVleet",
+      "team": "HOU",
+      "status": null,
+      "selected_position": null,
+      "eligible_positions": [
+        "PG"
+      ]
     }
   },
   "cade cunningham": {
@@ -41,6 +85,40 @@
       "team": "DET",
       "status": null,
       "selected_position": null
+    },
+    "2023-24": {
+      "player_key": "428.p.6512",
+      "player_id": "6512",
+      "name": "Cade Cunningham",
+      "team": "DET",
+      "status": null,
+      "selected_position": null,
+      "eligible_positions": [
+        "PG",
+        "SG"
+      ]
+    },
+    "2022-23": {
+      "player_key": "418.p.6512",
+      "player_id": "6512",
+      "name": "Cade Cunningham",
+      "team": "DET",
+      "status": null,
+      "selected_position": null,
+      "eligible_positions": [
+        "G"
+      ]
+    },
+    "2021-22": {
+      "player_key": "410.p.6512",
+      "player_id": "6512",
+      "name": "Cade Cunningham",
+      "team": "DET",
+      "status": null,
+      "selected_position": null,
+      "eligible_positions": [
+        "G"
+      ]
     }
   },
   "jalen green": {
@@ -51,6 +129,65 @@
       "team": "PHX",
       "status": null,
       "selected_position": "SF"
+    },
+    "2025-26": {
+      "player_key": "466.p.6513",
+      "player_id": "6513",
+      "name": "Jalen Green",
+      "team": "PHX",
+      "status": null,
+      "selected_position": null,
+      "eligible_positions": [
+        "PG",
+        "SF",
+        "SG"
+      ]
+    },
+    "2024-25": {
+      "player_key": "454.p.6513",
+      "player_id": "6513",
+      "name": "Jalen Green",
+      "team": "PHX",
+      "status": null,
+      "selected_position": null,
+      "eligible_positions": [
+        "PG",
+        "SG"
+      ]
+    },
+    "2023-24": {
+      "player_key": "428.p.6513",
+      "player_id": "6513",
+      "name": "Jalen Green",
+      "team": "PHX",
+      "status": null,
+      "selected_position": null,
+      "eligible_positions": [
+        "PG",
+        "SG"
+      ]
+    },
+    "2022-23": {
+      "player_key": "418.p.6513",
+      "player_id": "6513",
+      "name": "Jalen Green",
+      "team": "PHX",
+      "status": null,
+      "selected_position": null,
+      "eligible_positions": [
+        "SG"
+      ]
+    },
+    "2021-22": {
+      "player_key": "410.p.6513",
+      "player_id": "6513",
+      "name": "Jalen Green",
+      "team": "PHX",
+      "status": null,
+      "selected_position": null,
+      "eligible_positions": [
+        "SG"
+      ]
     }
   },
   "ace bailey": {
@@ -61,6 +198,19 @@
       "team": "UTA",
       "status": null,
       "selected_position": "PF"
+    },
+    "2025-26": {
+      "player_key": "466.p.10462",
+      "player_id": "10462",
+      "name": "Ace Bailey",
+      "team": "UTA",
+      "status": null,
+      "selected_position": null,
+      "eligible_positions": [
+        "PF",
+        "SF",
+        "SG"
+      ]
     }
   },
   "moussa diabate": {
@@ -71,6 +221,51 @@
       "team": "CHA",
       "status": null,
       "selected_position": "C"
+    },
+    "2025-26": {
+      "player_key": "466.p.6733",
+      "player_id": "6733",
+      "name": "Moussa Diabaté",
+      "team": "CHA",
+      "status": null,
+      "selected_position": null,
+      "eligible_positions": [
+        "C"
+      ]
+    },
+    "2024-25": {
+      "player_key": "454.p.6733",
+      "player_id": "6733",
+      "name": "Moussa Diabaté",
+      "team": "CHA",
+      "status": null,
+      "selected_position": null,
+      "eligible_positions": [
+        "C"
+      ]
+    },
+    "2023-24": {
+      "player_key": "428.p.6733",
+      "player_id": "6733",
+      "name": "Moussa Diabaté",
+      "team": "CHA",
+      "status": null,
+      "selected_position": null,
+      "eligible_positions": [
+        "C",
+        "PF"
+      ]
+    },
+    "2022-23": {
+      "player_key": "418.p.6733",
+      "player_id": "6733",
+      "name": "Moussa Diabaté",
+      "team": "CHA",
+      "status": "GTD",
+      "selected_position": null,
+      "eligible_positions": [
+        "PF"
+      ]
     }
   },
   "darryn peterson": {
@@ -107,6 +302,17 @@
       "team": "SAS",
       "status": null,
       "selected_position": null
+    },
+    "2024-25": {
+      "player_key": "454.p.10094",
+      "player_id": "10094",
+      "name": "Victor Wembanyama",
+      "team": "SAS",
+      "status": "GTD",
+      "selected_position": null,
+      "eligible_positions": [
+        "C"
+      ]
     }
   },
   "ajay mitchell": {
@@ -117,6 +323,29 @@
       "team": "OKC",
       "status": null,
       "selected_position": "BN"
+    },
+    "2025-26": {
+      "player_key": "466.p.10304",
+      "player_id": "10304",
+      "name": "Ajay Mitchell",
+      "team": "OKC",
+      "status": "GTD",
+      "selected_position": null,
+      "eligible_positions": [
+        "PG",
+        "SG"
+      ]
+    },
+    "2024-25": {
+      "player_key": "454.p.10304",
+      "player_id": "10304",
+      "name": "Ajay Mitchell",
+      "team": "OKC",
+      "status": null,
+      "selected_position": null,
+      "eligible_positions": [
+        "PG"
+      ]
     }
   },
   "darius acuff jr": {
@@ -137,6 +366,83 @@
       "team": "LAC",
       "status": null,
       "selected_position": "PG"
+    },
+    "2025-26": {
+      "player_key": "466.p.6167",
+      "player_id": "6167",
+      "name": "Darius Garland",
+      "team": "LAC",
+      "status": null,
+      "selected_position": null,
+      "eligible_positions": [
+        "PG"
+      ]
+    },
+    "2024-25": {
+      "player_key": "454.p.6167",
+      "player_id": "6167",
+      "name": "Darius Garland",
+      "team": "LAC",
+      "status": "INJ",
+      "selected_position": null,
+      "eligible_positions": [
+        "PG"
+      ]
+    },
+    "2023-24": {
+      "player_key": "428.p.6167",
+      "player_id": "6167",
+      "name": "Darius Garland",
+      "team": "LAC",
+      "status": null,
+      "selected_position": null,
+      "eligible_positions": [
+        "PG"
+      ]
+    },
+    "2022-23": {
+      "player_key": "418.p.6167",
+      "player_id": "6167",
+      "name": "Darius Garland",
+      "team": "LAC",
+      "status": null,
+      "selected_position": null,
+      "eligible_positions": [
+        "PG"
+      ]
+    },
+    "2021-22": {
+      "player_key": "410.p.6167",
+      "player_id": "6167",
+      "name": "Darius Garland",
+      "team": "LAC",
+      "status": null,
+      "selected_position": null,
+      "eligible_positions": [
+        "PG"
+      ]
+    },
+    "2020-21": {
+      "player_key": "402.p.6167",
+      "player_id": "6167",
+      "name": "Darius Garland",
+      "team": "LAC",
+      "status": null,
+      "selected_position": null,
+      "eligible_positions": [
+        "PG"
+      ]
+    },
+    "2019-20": {
+      "player_key": "395.p.6167",
+      "player_id": "6167",
+      "name": "Darius Garland",
+      "team": "LAC",
+      "status": null,
+      "selected_position": null,
+      "eligible_positions": [
+        "PG"
+      ]
     }
   },
   "devin booker": {
@@ -163,6 +469,75 @@
       "team": "PHX",
       "status": null,
       "selected_position": null
+    },
+    "2025-26": {
+      "player_key": "466.p.5473",
+      "player_id": "5473",
+      "name": "Devin Booker",
+      "team": "PHX",
+      "status": null,
+      "selected_position": null,
+      "eligible_positions": [
+        "PG",
+        "SG"
+      ]
+    },
+    "2023-24": {
+      "player_key": "428.p.5473",
+      "player_id": "5473",
+      "name": "Devin Booker",
+      "team": "PHX",
+      "status": null,
+      "selected_position": null,
+      "eligible_positions": [
+        "PG",
+        "SF",
+        "SG"
+      ]
+    },
+    "2022-23": {
+      "player_key": "418.p.5473",
+      "player_id": "5473",
+      "name": "Devin Booker",
+      "team": "PHX",
+      "status": null,
+      "selected_position": null,
+      "eligible_positions": [
+        "GF"
+      ]
+    },
+    "2021-22": {
+      "player_key": "410.p.5473",
+      "player_id": "5473",
+      "name": "Devin Booker",
+      "team": "PHX",
+      "status": null,
+      "selected_position": null,
+      "eligible_positions": [
+        "GF"
+      ]
+    },
+    "2019-20": {
+      "player_key": "395.p.5473",
+      "player_id": "5473",
+      "name": "Devin Booker",
+      "team": "PHX",
+      "status": null,
+      "selected_position": null,
+      "eligible_positions": [
+        "G"
+      ]
+    },
+    "2018-19": {
+      "player_key": "385.p.5473",
+      "player_id": "5473",
+      "name": "Devin Booker",
+      "team": "PHX",
+      "status": null,
+      "selected_position": null,
+      "eligible_positions": [
+        "G"
+      ]
     }
   },
   "brandon miller": {
@@ -173,6 +548,43 @@
       "team": "CHA",
       "status": null,
       "selected_position": "SF"
+    },
+    "2025-26": {
+      "player_key": "466.p.10104",
+      "player_id": "10104",
+      "name": "Brandon Miller",
+      "team": "CHA",
+      "status": "GTD",
+      "selected_position": null,
+      "eligible_positions": [
+        "PF",
+        "SF"
+      ]
+    },
+    "2024-25": {
+      "player_key": "454.p.10104",
+      "player_id": "10104",
+      "name": "Brandon Miller",
+      "team": "CHA",
+      "status": "GTD",
+      "selected_position": null,
+      "eligible_positions": [
+        "PF",
+        "SF",
+        "SG"
+      ]
+    },
+    "2023-24": {
+      "player_key": "428.p.10104",
+      "player_id": "10104",
+      "name": "Brandon Miller",
+      "team": "CHA",
+      "status": "GTD",
+      "selected_position": null,
+      "eligible_positions": [
+        "SF",
+        "SG"
+      ]
     }
   },
   "matas buzelis": {
@@ -183,6 +595,30 @@
       "team": "CHI",
       "status": null,
       "selected_position": "PF"
+    },
+    "2025-26": {
+      "player_key": "466.p.10265",
+      "player_id": "10265",
+      "name": "Matas Buzelis",
+      "team": "CHI",
+      "status": null,
+      "selected_position": null,
+      "eligible_positions": [
+        "PF",
+        "SF"
+      ]
+    },
+    "2024-25": {
+      "player_key": "454.p.10265",
+      "player_id": "10265",
+      "name": "Matas Buzelis",
+      "team": "CHI",
+      "status": null,
+      "selected_position": null,
+      "eligible_positions": [
+        "PF",
+        "SF"
+      ]
     }
   },
   "kel el ware": {
@@ -193,6 +629,30 @@
       "team": "MIL",
       "status": null,
       "selected_position": "C"
+    },
+    "2025-26": {
+      "player_key": "466.p.10274",
+      "player_id": "10274",
+      "name": "Kel'el Ware",
+      "team": "MIL",
+      "status": null,
+      "selected_position": null,
+      "eligible_positions": [
+        "C",
+        "PF"
+      ]
+    },
+    "2024-25": {
+      "player_key": "454.p.10274",
+      "player_id": "10274",
+      "name": "Kel'el Ware",
+      "team": "MIL",
+      "status": "GTD",
+      "selected_position": null,
+      "eligible_positions": [
+        "C",
+        "PF"
+      ]
     }
   },
   "alex sarr": {
@@ -203,6 +663,29 @@
       "team": "WAS",
       "status": null,
       "selected_position": "Util"
+    },
+    "2025-26": {
+      "player_key": "466.p.10294",
+      "player_id": "10294",
+      "name": "Alex Sarr",
+      "team": "WAS",
+      "status": "GTD",
+      "selected_position": null,
+      "eligible_positions": [
+        "C"
+      ]
+    },
+    "2024-25": {
+      "player_key": "454.p.10294",
+      "player_id": "10294",
+      "name": "Alex Sarr",
+      "team": "WAS",
+      "status": null,
+      "selected_position": null,
+      "eligible_positions": [
+        "C",
+        "PF"
+      ]
     }
   },
   "vj edgecombe": {
@@ -213,6 +696,18 @@
       "team": "PHI",
       "status": null,
       "selected_position": "Util"
+    },
+    "2025-26": {
+      "player_key": "466.p.10454",
+      "player_id": "10454",
+      "name": "VJ Edgecombe",
+      "team": "PHI",
+      "status": null,
+      "selected_position": null,
+      "eligible_positions": [
+        "PG",
+        "SG"
+      ]
     }
   },
   "aaron wiggins": {
@@ -223,6 +718,65 @@
       "team": "ATL",
       "status": null,
       "selected_position": "BN"
+    },
+    "2025-26": {
+      "player_key": "466.p.6597",
+      "player_id": "6597",
+      "name": "Aaron Wiggins",
+      "team": "ATL",
+      "status": null,
+      "selected_position": null,
+      "eligible_positions": [
+        "SF",
+        "SG"
+      ]
+    },
+    "2024-25": {
+      "player_key": "454.p.6597",
+      "player_id": "6597",
+      "name": "Aaron Wiggins",
+      "team": "ATL",
+      "status": null,
+      "selected_position": null,
+      "eligible_positions": [
+        "SF",
+        "SG"
+      ]
+    },
+    "2023-24": {
+      "player_key": "428.p.6597",
+      "player_id": "6597",
+      "name": "Aaron Wiggins",
+      "team": "ATL",
+      "status": null,
+      "selected_position": null,
+      "eligible_positions": [
+        "SF",
+        "SG"
+      ]
+    },
+    "2022-23": {
+      "player_key": "418.p.6597",
+      "player_id": "6597",
+      "name": "Aaron Wiggins",
+      "team": "ATL",
+      "status": null,
+      "selected_position": null,
+      "eligible_positions": [
+        "GF"
+      ]
+    },
+    "2021-22": {
+      "player_key": "410.p.6597",
+      "player_id": "6597",
+      "name": "Aaron Wiggins",
+      "team": "ATL",
+      "status": null,
+      "selected_position": null,
+      "eligible_positions": [
+        "F",
+        "GF"
+      ]
     }
   },
   "devin vassell": {
@@ -233,6 +787,78 @@
       "team": "SAS",
       "status": null,
       "selected_position": "BN"
+    },
+    "2025-26": {
+      "player_key": "466.p.6403",
+      "player_id": "6403",
+      "name": "Devin Vassell",
+      "team": "SAS",
+      "status": null,
+      "selected_position": null,
+      "eligible_positions": [
+        "SF",
+        "SG"
+      ]
+    },
+    "2024-25": {
+      "player_key": "454.p.6403",
+      "player_id": "6403",
+      "name": "Devin Vassell",
+      "team": "SAS",
+      "status": "GTD",
+      "selected_position": null,
+      "eligible_positions": [
+        "SF",
+        "SG"
+      ]
+    },
+    "2023-24": {
+      "player_key": "428.p.6403",
+      "player_id": "6403",
+      "name": "Devin Vassell",
+      "team": "SAS",
+      "status": "GTD",
+      "selected_position": null,
+      "eligible_positions": [
+        "SF",
+        "SG"
+      ]
+    },
+    "2022-23": {
+      "player_key": "418.p.6403",
+      "player_id": "6403",
+      "name": "Devin Vassell",
+      "team": "SAS",
+      "status": null,
+      "selected_position": null,
+      "eligible_positions": [
+        "GF",
+        "SF"
+      ]
+    },
+    "2021-22": {
+      "player_key": "410.p.6403",
+      "player_id": "6403",
+      "name": "Devin Vassell",
+      "team": "SAS",
+      "status": null,
+      "selected_position": null,
+      "eligible_positions": [
+        "GF",
+        "SF",
+        "SG"
+      ]
+    },
+    "2020-21": {
+      "player_key": "402.p.6403",
+      "player_id": "6403",
+      "name": "Devin Vassell",
+      "team": "SAS",
+      "status": null,
+      "selected_position": null,
+      "eligible_positions": [
+        "SG"
+      ]
     }
   },
   "jaren jackson jr": {
@@ -787,6 +1413,1150 @@
         "SG",
         "SF",
         "Util"
+      ]
+    }
+  },
+  "andrew wiggins": {
+    "2026-27": {
+      "player_key": "478.p.5292",
+      "player_id": "5292",
+      "name": "Andrew Wiggins",
+      "team": "MIA",
+      "status": null,
+      "selected_position": "BN",
+      "eligible_positions": [
+        "SG",
+        "SF",
+        "PF",
+        "Util"
+      ]
+    },
+    "2025-26": {
+      "player_key": "466.p.5292",
+      "player_id": "5292",
+      "name": "Andrew Wiggins",
+      "team": "MIA",
+      "status": null,
+      "selected_position": null,
+      "eligible_positions": [
+        "PF",
+        "SF",
+        "SG"
+      ]
+    },
+    "2024-25": {
+      "player_key": "454.p.5292",
+      "player_id": "5292",
+      "name": "Andrew Wiggins",
+      "team": "MIA",
+      "status": null,
+      "selected_position": null,
+      "eligible_positions": [
+        "PF",
+        "SF"
+      ]
+    },
+    "2023-24": {
+      "player_key": "428.p.5292",
+      "player_id": "5292",
+      "name": "Andrew Wiggins",
+      "team": "MIA",
+      "status": null,
+      "selected_position": null,
+      "eligible_positions": [
+        "PF",
+        "SF"
+      ]
+    },
+    "2022-23": {
+      "player_key": "418.p.5292",
+      "player_id": "5292",
+      "name": "Andrew Wiggins",
+      "team": "MIA",
+      "status": null,
+      "selected_position": null,
+      "eligible_positions": [
+        "F"
+      ]
+    },
+    "2021-22": {
+      "player_key": "410.p.5292",
+      "player_id": "5292",
+      "name": "Andrew Wiggins",
+      "team": "MIA",
+      "status": null,
+      "selected_position": null,
+      "eligible_positions": [
+        "GF"
+      ]
+    },
+    "2020-21": {
+      "player_key": "402.p.5292",
+      "player_id": "5292",
+      "name": "Andrew Wiggins",
+      "team": "MIA",
+      "status": null,
+      "selected_position": null,
+      "eligible_positions": [
+        "GF"
+      ]
+    },
+    "2019-20": {
+      "player_key": "395.p.5292",
+      "player_id": "5292",
+      "name": "Andrew Wiggins",
+      "team": "MIA",
+      "status": null,
+      "selected_position": null,
+      "eligible_positions": [
+        "GF"
+      ]
+    },
+    "2018-19": {
+      "player_key": "385.p.5292",
+      "player_id": "5292",
+      "name": "Andrew Wiggins",
+      "team": "MIA",
+      "status": null,
+      "selected_position": null,
+      "eligible_positions": [
+        "GF"
+      ]
+    }
+  },
+  "coby white": {
+    "2026-27": {
+      "player_key": "478.p.6169",
+      "player_id": "6169",
+      "name": "Coby White",
+      "team": "CHA",
+      "status": null,
+      "selected_position": null,
+      "eligible_positions": [
+        "PG",
+        "SG",
+        "Util"
+      ]
+    },
+    "2025-26": {
+      "player_key": "466.p.6169",
+      "player_id": "6169",
+      "name": "Coby White",
+      "team": "CHA",
+      "status": null,
+      "selected_position": null,
+      "eligible_positions": [
+        "PG",
+        "SG"
+      ]
+    },
+    "2024-25": {
+      "player_key": "454.p.6169",
+      "player_id": "6169",
+      "name": "Coby White",
+      "team": "CHA",
+      "status": null,
+      "selected_position": null,
+      "eligible_positions": [
+        "PG",
+        "SG"
+      ]
+    },
+    "2023-24": {
+      "player_key": "428.p.6169",
+      "player_id": "6169",
+      "name": "Coby White",
+      "team": "CHA",
+      "status": null,
+      "selected_position": null,
+      "eligible_positions": [
+        "PG",
+        "SG"
+      ]
+    },
+    "2022-23": {
+      "player_key": "418.p.6169",
+      "player_id": "6169",
+      "name": "Coby White",
+      "team": "CHA",
+      "status": null,
+      "selected_position": null,
+      "eligible_positions": [
+        "G"
+      ]
+    },
+    "2021-22": {
+      "player_key": "410.p.6169",
+      "player_id": "6169",
+      "name": "Coby White",
+      "team": "CHA",
+      "status": null,
+      "selected_position": null,
+      "eligible_positions": [
+        "G"
+      ]
+    },
+    "2020-21": {
+      "player_key": "402.p.6169",
+      "player_id": "6169",
+      "name": "Coby White",
+      "team": "CHA",
+      "status": "O",
+      "selected_position": null,
+      "eligible_positions": [
+        "G",
+        "PG"
+      ]
+    },
+    "2019-20": {
+      "player_key": "395.p.6169",
+      "player_id": "6169",
+      "name": "Coby White",
+      "team": "CHA",
+      "status": null,
+      "selected_position": null,
+      "eligible_positions": [
+        "PG"
+      ]
+    }
+  },
+  "brandin podziemski": {
+    "2026-27": {
+      "player_key": "478.p.10115",
+      "player_id": "10115",
+      "name": "Brandin Podziemski",
+      "team": "GSW",
+      "status": null,
+      "selected_position": "PG",
+      "eligible_positions": [
+        "PG",
+        "SG",
+        "Util"
+      ]
+    },
+    "2025-26": {
+      "player_key": "466.p.10115",
+      "player_id": "10115",
+      "name": "Brandin Podziemski",
+      "team": "GSW",
+      "status": null,
+      "selected_position": null,
+      "eligible_positions": [
+        "PG",
+        "SG"
+      ]
+    },
+    "2024-25": {
+      "player_key": "454.p.10115",
+      "player_id": "10115",
+      "name": "Brandin Podziemski",
+      "team": "GSW",
+      "status": "GTD",
+      "selected_position": null,
+      "eligible_positions": [
+        "PG",
+        "SG"
+      ]
+    },
+    "2023-24": {
+      "player_key": "428.p.10115",
+      "player_id": "10115",
+      "name": "Brandin Podziemski",
+      "team": "GSW",
+      "status": null,
+      "selected_position": null,
+      "eligible_positions": [
+        "SG"
+      ]
+    }
+  },
+  "cj mccollum": {
+    "2026-27": {
+      "player_key": "478.p.5161",
+      "player_id": "5161",
+      "name": "CJ McCollum",
+      "team": "ATL",
+      "status": null,
+      "selected_position": "SG",
+      "eligible_positions": [
+        "PG",
+        "SG",
+        "Util"
+      ]
+    },
+    "2025-26": {
+      "player_key": "466.p.5161",
+      "player_id": "5161",
+      "name": "CJ McCollum",
+      "team": "ATL",
+      "status": null,
+      "selected_position": null,
+      "eligible_positions": [
+        "PG",
+        "SG"
+      ]
+    },
+    "2024-25": {
+      "player_key": "454.p.5161",
+      "player_id": "5161",
+      "name": "CJ McCollum",
+      "team": "ATL",
+      "status": null,
+      "selected_position": null,
+      "eligible_positions": [
+        "PG",
+        "SG"
+      ]
+    },
+    "2023-24": {
+      "player_key": "428.p.5161",
+      "player_id": "5161",
+      "name": "CJ McCollum",
+      "team": "ATL",
+      "status": null,
+      "selected_position": null,
+      "eligible_positions": [
+        "PG",
+        "SG"
+      ]
+    },
+    "2022-23": {
+      "player_key": "418.p.5161",
+      "player_id": "5161",
+      "name": "CJ McCollum",
+      "team": "ATL",
+      "status": "GTD",
+      "selected_position": null,
+      "eligible_positions": [
+        "G"
+      ]
+    },
+    "2021-22": {
+      "player_key": "410.p.5161",
+      "player_id": "5161",
+      "name": "CJ McCollum",
+      "team": "ATL",
+      "status": null,
+      "selected_position": null,
+      "eligible_positions": [
+        "G"
+      ]
+    },
+    "2020-21": {
+      "player_key": "402.p.5161",
+      "player_id": "5161",
+      "name": "CJ McCollum",
+      "team": "ATL",
+      "status": null,
+      "selected_position": null,
+      "eligible_positions": [
+        "G"
+      ]
+    },
+    "2019-20": {
+      "player_key": "395.p.5161",
+      "player_id": "5161",
+      "name": "CJ McCollum",
+      "team": "ATL",
+      "status": "GTD",
+      "selected_position": null,
+      "eligible_positions": [
+        "G"
+      ]
+    },
+    "2018-19": {
+      "player_key": "385.p.5161",
+      "player_id": "5161",
+      "name": "CJ McCollum",
+      "team": "ATL",
+      "status": null,
+      "selected_position": null,
+      "eligible_positions": [
+        "G"
+      ]
+    }
+  },
+  "austin reaves": {
+    "2026-27": {
+      "player_key": "478.p.6606",
+      "player_id": "6606",
+      "name": "Austin Reaves",
+      "team": "LAL",
+      "status": null,
+      "selected_position": "SF",
+      "eligible_positions": [
+        "PG",
+        "SG",
+        "SF",
+        "Util"
+      ]
+    },
+    "2025-26": {
+      "player_key": "466.p.6606",
+      "player_id": "6606",
+      "name": "Austin Reaves",
+      "team": "LAL",
+      "status": null,
+      "selected_position": null,
+      "eligible_positions": [
+        "PG",
+        "SF",
+        "SG"
+      ]
+    },
+    "2024-25": {
+      "player_key": "454.p.6606",
+      "player_id": "6606",
+      "name": "Austin Reaves",
+      "team": "LAL",
+      "status": null,
+      "selected_position": null,
+      "eligible_positions": [
+        "PG",
+        "SG"
+      ]
+    },
+    "2023-24": {
+      "player_key": "428.p.6606",
+      "player_id": "6606",
+      "name": "Austin Reaves",
+      "team": "LAL",
+      "status": null,
+      "selected_position": null,
+      "eligible_positions": [
+        "PG",
+        "SF",
+        "SG"
+      ]
+    },
+    "2022-23": {
+      "player_key": "418.p.6606",
+      "player_id": "6606",
+      "name": "Austin Reaves",
+      "team": "LAL",
+      "status": null,
+      "selected_position": null,
+      "eligible_positions": [
+        "GF"
+      ]
+    },
+    "2021-22": {
+      "player_key": "410.p.6606",
+      "player_id": "6606",
+      "name": "Austin Reaves",
+      "team": "LAL",
+      "status": null,
+      "selected_position": null,
+      "eligible_positions": [
+        "SG"
+      ]
+    }
+  },
+  "og anunoby": {
+    "2026-27": {
+      "player_key": "478.p.5836",
+      "player_id": "5836",
+      "name": "OG Anunoby",
+      "team": "NYK",
+      "status": null,
+      "selected_position": "PF",
+      "eligible_positions": [
+        "SF",
+        "PF",
+        "Util"
+      ]
+    },
+    "2025-26": {
+      "player_key": "466.p.5836",
+      "player_id": "5836",
+      "name": "OG Anunoby",
+      "team": "NYK",
+      "status": null,
+      "selected_position": null,
+      "eligible_positions": [
+        "PF",
+        "SF"
+      ]
+    },
+    "2024-25": {
+      "player_key": "454.p.5836",
+      "player_id": "5836",
+      "name": "OG Anunoby",
+      "team": "NYK",
+      "status": null,
+      "selected_position": null,
+      "eligible_positions": [
+        "PF",
+        "SF"
+      ]
+    },
+    "2023-24": {
+      "player_key": "428.p.5836",
+      "player_id": "5836",
+      "name": "OG Anunoby",
+      "team": "NYK",
+      "status": "GTD",
+      "selected_position": null,
+      "eligible_positions": [
+        "SF",
+        "SG"
+      ]
+    },
+    "2022-23": {
+      "player_key": "418.p.5836",
+      "player_id": "5836",
+      "name": "OG Anunoby",
+      "team": "NYK",
+      "status": null,
+      "selected_position": null,
+      "eligible_positions": [
+        "GF"
+      ]
+    },
+    "2021-22": {
+      "player_key": "410.p.5836",
+      "player_id": "5836",
+      "name": "OG Anunoby",
+      "team": "NYK",
+      "status": null,
+      "selected_position": null,
+      "eligible_positions": [
+        "F"
+      ]
+    },
+    "2020-21": {
+      "player_key": "402.p.5836",
+      "player_id": "5836",
+      "name": "OG Anunoby",
+      "team": "NYK",
+      "status": null,
+      "selected_position": null,
+      "eligible_positions": [
+        "F"
+      ]
+    },
+    "2019-20": {
+      "player_key": "395.p.5836",
+      "player_id": "5836",
+      "name": "OG Anunoby",
+      "team": "NYK",
+      "status": null,
+      "selected_position": null,
+      "eligible_positions": [
+        "F"
+      ]
+    },
+    "2018-19": {
+      "player_key": "385.p.5836",
+      "player_id": "5836",
+      "name": "OG Anunoby",
+      "team": "NYK",
+      "status": null,
+      "selected_position": null,
+      "eligible_positions": [
+        "F"
+      ]
+    }
+  },
+  "onyeka okongwu": {
+    "2026-27": {
+      "player_key": "478.p.6398",
+      "player_id": "6398",
+      "name": "Onyeka Okongwu",
+      "team": "ATL",
+      "status": null,
+      "selected_position": "C",
+      "eligible_positions": [
+        "C",
+        "Util"
+      ]
+    },
+    "2025-26": {
+      "player_key": "466.p.6398",
+      "player_id": "6398",
+      "name": "Onyeka Okongwu",
+      "team": "ATL",
+      "status": null,
+      "selected_position": null,
+      "eligible_positions": [
+        "C",
+        "PF"
+      ]
+    },
+    "2024-25": {
+      "player_key": "454.p.6398",
+      "player_id": "6398",
+      "name": "Onyeka Okongwu",
+      "team": "ATL",
+      "status": null,
+      "selected_position": null,
+      "eligible_positions": [
+        "C",
+        "PF"
+      ]
+    },
+    "2023-24": {
+      "player_key": "428.p.6398",
+      "player_id": "6398",
+      "name": "Onyeka Okongwu",
+      "team": "ATL",
+      "status": "GTD",
+      "selected_position": null,
+      "eligible_positions": [
+        "C"
+      ]
+    },
+    "2022-23": {
+      "player_key": "418.p.6398",
+      "player_id": "6398",
+      "name": "Onyeka Okongwu",
+      "team": "ATL",
+      "status": null,
+      "selected_position": null,
+      "eligible_positions": [
+        "C"
+      ]
+    },
+    "2021-22": {
+      "player_key": "410.p.6398",
+      "player_id": "6398",
+      "name": "Onyeka Okongwu",
+      "team": "ATL",
+      "status": null,
+      "selected_position": null,
+      "eligible_positions": [
+        "FC"
+      ]
+    },
+    "2020-21": {
+      "player_key": "402.p.6398",
+      "player_id": "6398",
+      "name": "Onyeka Okongwu",
+      "team": "ATL",
+      "status": "O",
+      "selected_position": null,
+      "eligible_positions": [
+        "FC"
+      ]
+    }
+  },
+  "julius randle": {
+    "2026-27": {
+      "player_key": "478.p.5318",
+      "player_id": "5318",
+      "name": "Julius Randle",
+      "team": "BKN",
+      "status": null,
+      "selected_position": "Util",
+      "eligible_positions": [
+        "PF",
+        "Util"
+      ]
+    },
+    "2025-26": {
+      "player_key": "466.p.5318",
+      "player_id": "5318",
+      "name": "Julius Randle",
+      "team": "BKN",
+      "status": null,
+      "selected_position": null,
+      "eligible_positions": [
+        "C",
+        "PF"
+      ]
+    },
+    "2024-25": {
+      "player_key": "454.p.5318",
+      "player_id": "5318",
+      "name": "Julius Randle",
+      "team": "BKN",
+      "status": null,
+      "selected_position": null,
+      "eligible_positions": [
+        "C",
+        "PF"
+      ]
+    },
+    "2023-24": {
+      "player_key": "428.p.5318",
+      "player_id": "5318",
+      "name": "Julius Randle",
+      "team": "BKN",
+      "status": "GTD",
+      "selected_position": null,
+      "eligible_positions": [
+        "PF"
+      ]
+    },
+    "2022-23": {
+      "player_key": "418.p.5318",
+      "player_id": "5318",
+      "name": "Julius Randle",
+      "team": "BKN",
+      "status": "GTD",
+      "selected_position": null,
+      "eligible_positions": [
+        "PF"
+      ]
+    },
+    "2021-22": {
+      "player_key": "410.p.5318",
+      "player_id": "5318",
+      "name": "Julius Randle",
+      "team": "BKN",
+      "status": null,
+      "selected_position": null,
+      "eligible_positions": [
+        "FC"
+      ]
+    },
+    "2020-21": {
+      "player_key": "402.p.5318",
+      "player_id": "5318",
+      "name": "Julius Randle",
+      "team": "BKN",
+      "status": null,
+      "selected_position": null,
+      "eligible_positions": [
+        "FC"
+      ]
+    },
+    "2019-20": {
+      "player_key": "395.p.5318",
+      "player_id": "5318",
+      "name": "Julius Randle",
+      "team": "BKN",
+      "status": null,
+      "selected_position": null,
+      "eligible_positions": [
+        "FC"
+      ]
+    },
+    "2018-19": {
+      "player_key": "385.p.5318",
+      "player_id": "5318",
+      "name": "Julius Randle",
+      "team": "BKN",
+      "status": null,
+      "selected_position": null,
+      "eligible_positions": [
+        "FC"
+      ]
+    }
+  },
+  "lamelo ball": {
+    "2026-27": {
+      "player_key": "478.p.6395",
+      "player_id": "6395",
+      "name": "LaMelo Ball",
+      "team": "MIN",
+      "status": null,
+      "selected_position": "Util",
+      "eligible_positions": [
+        "PG",
+        "Util"
+      ]
+    },
+    "2025-26": {
+      "player_key": "466.p.6395",
+      "player_id": "6395",
+      "name": "LaMelo Ball",
+      "team": "MIN",
+      "status": null,
+      "selected_position": null,
+      "eligible_positions": [
+        "PG",
+        "SG"
+      ]
+    },
+    "2024-25": {
+      "player_key": "454.p.6395",
+      "player_id": "6395",
+      "name": "LaMelo Ball",
+      "team": "MIN",
+      "status": "GTD",
+      "selected_position": null,
+      "eligible_positions": [
+        "PG",
+        "SG"
+      ]
+    },
+    "2023-24": {
+      "player_key": "428.p.6395",
+      "player_id": "6395",
+      "name": "LaMelo Ball",
+      "team": "MIN",
+      "status": "GTD",
+      "selected_position": null,
+      "eligible_positions": [
+        "PG",
+        "SG"
+      ]
+    },
+    "2022-23": {
+      "player_key": "418.p.6395",
+      "player_id": "6395",
+      "name": "LaMelo Ball",
+      "team": "MIN",
+      "status": "GTD",
+      "selected_position": null,
+      "eligible_positions": [
+        "G"
+      ]
+    },
+    "2021-22": {
+      "player_key": "410.p.6395",
+      "player_id": "6395",
+      "name": "LaMelo Ball",
+      "team": "MIN",
+      "status": null,
+      "selected_position": null,
+      "eligible_positions": [
+        "G"
+      ]
+    },
+    "2020-21": {
+      "player_key": "402.p.6395",
+      "player_id": "6395",
+      "name": "LaMelo Ball",
+      "team": "MIN",
+      "status": null,
+      "selected_position": null,
+      "eligible_positions": [
+        "G"
+      ]
+    }
+  },
+  "collin murray boyles": {
+    "2026-27": {
+      "player_key": "478.p.10443",
+      "player_id": "10443",
+      "name": "Collin Murray-Boyles",
+      "team": "TOR",
+      "status": null,
+      "selected_position": "BN",
+      "eligible_positions": [
+        "PF",
+        "C",
+        "Util"
+      ]
+    },
+    "2025-26": {
+      "player_key": "466.p.10443",
+      "player_id": "10443",
+      "name": "Collin Murray-Boyles",
+      "team": "TOR",
+      "status": "GTD",
+      "selected_position": null,
+      "eligible_positions": [
+        "C",
+        "PF"
+      ]
+    }
+  },
+  "ryan rollins": {
+    "2026-27": {
+      "player_key": "478.p.6734",
+      "player_id": "6734",
+      "name": "Ryan Rollins",
+      "team": "MIL",
+      "status": null,
+      "selected_position": "BN",
+      "eligible_positions": [
+        "PG",
+        "SG",
+        "Util"
+      ]
+    },
+    "2025-26": {
+      "player_key": "466.p.6734",
+      "player_id": "6734",
+      "name": "Ryan Rollins",
+      "team": "MIL",
+      "status": null,
+      "selected_position": null,
+      "eligible_positions": [
+        "PG",
+        "SG"
+      ]
+    },
+    "2024-25": {
+      "player_key": "454.p.6734",
+      "player_id": "6734",
+      "name": "Ryan Rollins",
+      "team": "MIL",
+      "status": null,
+      "selected_position": null,
+      "eligible_positions": [
+        "PG"
+      ]
+    },
+    "2023-24": {
+      "player_key": "428.p.6734",
+      "player_id": "6734",
+      "name": "Ryan Rollins",
+      "team": "MIL",
+      "status": null,
+      "selected_position": null,
+      "eligible_positions": [
+        "PG"
+      ]
+    },
+    "2022-23": {
+      "player_key": "418.p.6734",
+      "player_id": "6734",
+      "name": "Ryan Rollins",
+      "team": "MIL",
+      "status": null,
+      "selected_position": null,
+      "eligible_positions": [
+        "SG"
+      ]
+    }
+  },
+  "neemias queta": {
+    "2026-27": {
+      "player_key": "478.p.6581",
+      "player_id": "6581",
+      "name": "Neemias Queta",
+      "team": "BOS",
+      "status": null,
+      "selected_position": null,
+      "eligible_positions": [
+        "C",
+        "Util"
+      ]
+    },
+    "2025-26": {
+      "player_key": "466.p.6581",
+      "player_id": "6581",
+      "name": "Neemias Queta",
+      "team": "BOS",
+      "status": null,
+      "selected_position": null,
+      "eligible_positions": [
+        "C",
+        "PF"
+      ]
+    },
+    "2024-25": {
+      "player_key": "454.p.6581",
+      "player_id": "6581",
+      "name": "Neemias Queta",
+      "team": "BOS",
+      "status": null,
+      "selected_position": null,
+      "eligible_positions": [
+        "C"
+      ]
+    },
+    "2023-24": {
+      "player_key": "428.p.6581",
+      "player_id": "6581",
+      "name": "Neemias Queta",
+      "team": "BOS",
+      "status": null,
+      "selected_position": null,
+      "eligible_positions": [
+        "C"
+      ]
+    },
+    "2022-23": {
+      "player_key": "418.p.6581",
+      "player_id": "6581",
+      "name": "Neemias Queta",
+      "team": "BOS",
+      "status": "GTD",
+      "selected_position": null,
+      "eligible_positions": [
+        "C"
+      ]
+    }
+  },
+  "miles bridges": {
+    "2026-27": {
+      "player_key": "478.p.6023",
+      "player_id": "6023",
+      "name": "Miles Bridges",
+      "team": "PHX",
+      "status": null,
+      "selected_position": null,
+      "eligible_positions": [
+        "PF",
+        "Util"
+      ]
+    },
+    "2025-26": {
+      "player_key": "466.p.6023",
+      "player_id": "6023",
+      "name": "Miles Bridges",
+      "team": "PHX",
+      "status": null,
+      "selected_position": null,
+      "eligible_positions": [
+        "PF",
+        "SF"
+      ]
+    },
+    "2024-25": {
+      "player_key": "454.p.6023",
+      "player_id": "6023",
+      "name": "Miles Bridges",
+      "team": "PHX",
+      "status": "GTD",
+      "selected_position": null,
+      "eligible_positions": [
+        "PF",
+        "SF"
+      ]
+    },
+    "2023-24": {
+      "player_key": "428.p.6023",
+      "player_id": "6023",
+      "name": "Miles Bridges",
+      "team": "PHX",
+      "status": "GTD",
+      "selected_position": null,
+      "eligible_positions": [
+        "PF",
+        "SF"
+      ]
+    },
+    "2022-23": {
+      "player_key": "418.p.6023",
+      "player_id": "6023",
+      "name": "Miles Bridges",
+      "team": "PHX",
+      "status": "O",
+      "selected_position": null,
+      "eligible_positions": [
+        "F"
+      ]
+    }
+  },
+  "jaden mcdaniels": {
+    "2026-27": {
+      "player_key": "478.p.6420",
+      "player_id": "6420",
+      "name": "Jaden McDaniels",
+      "team": "MIN",
+      "status": null,
+      "selected_position": null,
+      "eligible_positions": [
+        "SF",
+        "Util"
+      ]
+    },
+    "2025-26": {
+      "player_key": "466.p.6420",
+      "player_id": "6420",
+      "name": "Jaden McDaniels",
+      "team": "MIN",
+      "status": null,
+      "selected_position": null,
+      "eligible_positions": [
+        "PF",
+        "SF"
+      ]
+    },
+    "2024-25": {
+      "player_key": "454.p.6420",
+      "player_id": "6420",
+      "name": "Jaden McDaniels",
+      "team": "MIN",
+      "status": null,
+      "selected_position": null,
+      "eligible_positions": [
+        "PF",
+        "SF"
+      ]
+    },
+    "2023-24": {
+      "player_key": "428.p.6420",
+      "player_id": "6420",
+      "name": "Jaden McDaniels",
+      "team": "MIN",
+      "status": null,
+      "selected_position": null,
+      "eligible_positions": [
+        "PF",
+        "SF"
+      ]
+    },
+    "2022-23": {
+      "player_key": "418.p.6420",
+      "player_id": "6420",
+      "name": "Jaden McDaniels",
+      "team": "MIN",
+      "status": "GTD",
+      "selected_position": null,
+      "eligible_positions": [
+        "F"
+      ]
+    }
+  },
+  "brayden burries": {
+    "2026-27": {
+      "player_key": "478.p.10576",
+      "player_id": "10576",
+      "name": "Brayden Burries",
+      "team": "MIL",
+      "status": null,
+      "selected_position": "SG",
+      "eligible_positions": [
+        "SG",
+        "Util"
+      ]
+    }
+  },
+  "rui hachimura": {
+    "2026-27": {
+      "player_key": "478.p.6171",
+      "player_id": "6171",
+      "name": "Rui Hachimura",
+      "team": "LAC",
+      "status": null,
+      "selected_position": "SF",
+      "eligible_positions": [
+        "SF",
+        "PF",
+        "Util"
+      ]
+    },
+    "2025-26": {
+      "player_key": "466.p.6171",
+      "player_id": "6171",
+      "name": "Rui Hachimura",
+      "team": "LAC",
+      "status": null,
+      "selected_position": null,
+      "eligible_positions": [
+        "PF",
+        "SF"
+      ]
+    },
+    "2024-25": {
+      "player_key": "454.p.6171",
+      "player_id": "6171",
+      "name": "Rui Hachimura",
+      "team": "LAC",
+      "status": null,
+      "selected_position": null,
+      "eligible_positions": [
+        "PF",
+        "SF"
+      ]
+    },
+    "2023-24": {
+      "player_key": "428.p.6171",
+      "player_id": "6171",
+      "name": "Rui Hachimura",
+      "team": "LAC",
+      "status": null,
+      "selected_position": null,
+      "eligible_positions": [
+        "PF",
+        "SF"
       ]
     }
   }
