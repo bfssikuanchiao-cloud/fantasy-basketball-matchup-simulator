@@ -253,14 +253,40 @@ def show_team_editor(team_key, title):
     else:
         st.info(f"{title} 目前沒有球員。")
 
-def yahoo_injury_designation(player):
-    """Display Yahoo's raw player injury designation; healthy players are blank."""
+def yahoo_injury_status(player):
+    """Return Yahoo's raw injury status for application logic."""
     return str(player.get("status") or "").strip().upper()
 
 
+def yahoo_injury_designation(player):
+    """Return an injury label for display only; keep raw Yahoo status untouched."""
+    status = yahoo_injury_status(player)
+    display_map = {
+        "O": "O ❌",
+        "D": "D 🟠",
+        "Q": "Q 🔵",
+        "P": "P 🟢",
+    }
+    return display_map.get(status, status)
+
+
+def style_injury_status(value):
+    """Bold/color the read-only Injury cell without changing its underlying logic."""
+    display = str(value or "").strip()
+    status = display.split(maxsplit=1)[0].upper() if display else ""
+    color_map = {
+        "O": "#DC2626",  # red
+        "D": "#F97316",  # orange
+        "Q": "#2563EB",  # blue
+        "P": "#16A34A",  # green
+    }
+    color = color_map.get(status)
+    return f"color: {color}; font-weight: 700;" if color else ""
+
+
 def injury_default_enabled(player):
-    """Keep the existing safe default behavior while displaying Yahoo's raw code."""
-    raw_status = yahoo_injury_designation(player)
+    """Use only raw Yahoo status for schedule-selection defaults."""
+    raw_status = yahoo_injury_status(player)
     slot = str(player.get("selected_position") or "").strip().upper()
     if slot in {"IL", "IL+", "IR", "IR+"}:
         return False
@@ -396,8 +422,12 @@ def render_game_selector(label, side_key, players, schedule_df, start_date, end_
         column_config[game_col] = st.column_config.TextColumn(game_col, width="small")
 
     editor_key = f"game_matrix_{side_key}_{pd.Timestamp(start_date):%Y%m%d}_{pd.Timestamp(end_date):%Y%m%d}"
+    styled_matrix = matrix.style.map(
+        style_injury_status,
+        subset=["Injury"],
+    )
     edited = st.data_editor(
-        matrix,
+        styled_matrix,
         key=editor_key,
         hide_index=True,
         use_container_width=True,
