@@ -26,8 +26,10 @@ Notes
 
 from __future__ import annotations
 
+import json
 import random
 import time
+from datetime import datetime, timezone
 from pathlib import Path
 
 import pandas as pd
@@ -54,9 +56,12 @@ SEASONS = [
 # Add "Playoffs" here later if you explicitly want postseason games too.
 SEASON_TYPES = ["Regular Season"]
 
-OUTPUT_FILE = Path("nba_schedule_2018_2027.csv")
-CHECKPOINT_FILE = Path("nba_schedule_checkpoint.csv")
-FAILED_FILE = Path("nba_schedule_failed_requests.csv")
+BASE_DIR = Path(__file__).resolve().parent
+OUTPUT_FILE = BASE_DIR / "nba_schedule_2018_2027.csv"
+CHECKPOINT_FILE = BASE_DIR / "nba_schedule_checkpoint.csv"
+FAILED_FILE = BASE_DIR / "nba_schedule_failed_requests.csv"
+REFRESH_STATE_FILE = BASE_DIR / "nba_schedule_refresh_state.json"
+REFRESH_TTL_HOURS = 24
 
 LEAGUE_ID = "00"
 MAX_RETRIES = 4
@@ -178,18 +183,19 @@ def fetch_one(season: str, season_type: str) -> pd.DataFrame:
 
 
 def load_checkpoint() -> pd.DataFrame:
-    if not CHECKPOINT_FILE.exists():
+    source = CHECKPOINT_FILE if CHECKPOINT_FILE.exists() else OUTPUT_FILE
+    if not source.exists():
         return pd.DataFrame()
 
     try:
         df = pd.read_csv(
-            CHECKPOINT_FILE,
+            source,
             dtype={"GAME_ID": str, "TEAM": str, "OPP": str},
         )
-        print(f"Loaded checkpoint: {len(df):,} rows")
+        print(f"Loaded schedule seed: {source.name} | {len(df):,} rows")
         return df
     except Exception as exc:
-        print(f"Checkpoint could not be read and will be ignored: {exc}")
+        print(f"Schedule seed could not be read and will be ignored: {exc}")
         return pd.DataFrame()
 
 
@@ -242,7 +248,59 @@ def validate_cache(df: pd.DataFrame) -> None:
         )
 
 
+def _load_refresh_state() -> dict:
+    if not REFRESH_STATE_FILE.exists():
+        return {}
+    try:
+        data = json.loads(REFRESH_STATE_FILE.read_text(encoding="utf-8"))
+        return data if isinstance(data, dict) else {}
+    except Exception as exc:
+        print(f"Schedule refresh state could not be read: {exc}")
+        return {}
+
+def _cache_is_fresh(max_age_hours: int = REFRESH_TTL_HOURS) -> tuple[bool, str | None, float | None]:
+    state = _load_refresh_state()
+    last_text = state.get("last_successful_refresh")
+    if not last_text or not OUTPUT_FILE.exists():
+        return False, last_text, None
+    try:
+        last_dt = datetime.fromisoformat(str(last_text).replace("Z", "+00:00"))
+        if last_dt.tzinfo is None:
+            last_dt = last_dt.replace(tzinfo=timezone.utc)
+        age_hours = (datetime.now(timezone.utc) - last_dt.astimezone(timezone.utc)).total_seconds() / 3600.0
+        return age_hours < float(max_age_hours), last_text, age_hours
+    except Exception as exc:
+        print(f"Schedule refresh timestamp is invalid: {exc}")
+        return False, last_text, None
+
+def _write_refresh_state(latest_completed_game_date: str | None) -> str:
+    refreshed_at = datetime.now(timezone.utc).isoformat(timespec="seconds")
+    payload = {
+        "last_successful_refresh": refreshed_at,
+        "current_season": CURRENT_SEASON,
+        "latest_completed_game_date": latest_completed_game_date,
+    }
+    temp_path = REFRESH_STATE_FILE.with_suffix(".tmp")
+    temp_path.write_text(json.dumps(payload, indent=2), encoding="utf-8")
+    temp_path.replace(REFRESH_STATE_FILE)
+    return refreshed_at
+
 def update_schedule_cache() -> dict:
+    is_fresh, last_refresh, age_hours = _cache_is_fresh()
+    if is_fresh:
+        cached = pd.read_csv(OUTPUT_FILE, dtype={"GAME_ID": str, "TEAM": str, "OPP": str})
+        current_rows = cached.loc[cached["SEASON"].astype(str).eq(CURRENT_SEASON)]
+        latest_date = None if current_rows.empty else str(current_rows["DATE"].max())
+        print(f"[SCHEDULE_CACHE] FRESH | age_hours={age_hours:.2f} | ttl_hours={REFRESH_TTL_HOURS} | SKIP NBA API")
+        return {
+            "output_file": str(OUTPUT_FILE), "rows": int(len(cached)),
+            "current_season": CURRENT_SEASON, "current_season_rows": int(len(current_rows)),
+            "latest_completed_game_date": latest_date, "failures": [],
+            "refreshed": False, "last_successful_refresh": last_refresh,
+            "cache_age_hours": age_hours, "refresh_ttl_hours": REFRESH_TTL_HOURS,
+        }
+
+    print(f"[SCHEDULE_CACHE] STALE OR UNKNOWN | ttl_hours={REFRESH_TTL_HOURS} | REFRESH NBA API")
     checkpoint = load_checkpoint()
     combined = checkpoint.copy()
     failures: list[dict[str, str]] = []
@@ -340,15 +398,16 @@ def update_schedule_cache() -> dict:
         ].tail(12).to_string(index=False)
     )
 
+    latest_completed_game_date = None if current_rows.empty else str(current_rows["DATE"].max())
+    successful_current_refresh = not any(item.get("SEASON") == CURRENT_SEASON for item in failures)
+    refreshed_at = _write_refresh_state(latest_completed_game_date) if successful_current_refresh else last_refresh
     return {
-        "output_file": str(OUTPUT_FILE),
-        "rows": int(len(combined)),
-        "current_season": CURRENT_SEASON,
-        "current_season_rows": int(len(current_rows)),
-        "latest_completed_game_date": (
-            None if current_rows.empty else str(current_rows["DATE"].max())
-        ),
-        "failures": failures,
+        "output_file": str(OUTPUT_FILE), "rows": int(len(combined)),
+        "current_season": CURRENT_SEASON, "current_season_rows": int(len(current_rows)),
+        "latest_completed_game_date": latest_completed_game_date, "failures": failures,
+        "refreshed": successful_current_refresh, "last_successful_refresh": refreshed_at,
+        "cache_age_hours": 0.0 if successful_current_refresh else age_hours,
+        "refresh_ttl_hours": REFRESH_TTL_HOURS,
     }
 
 
