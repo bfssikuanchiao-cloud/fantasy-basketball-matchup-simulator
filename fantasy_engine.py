@@ -797,41 +797,32 @@ def download_yahoo_player_season(
         .unique()
     )
 
-    # Current season uses two complementary freshness rules:
-    # 1. Every never-checked date is fetched, so a long gap between app runs
-    #    cannot create a hole in the season.
-    # 2. Candidate dates in the most recent 14 calendar days are fetched again
-    #    even when already checked, allowing delayed Yahoo updates/corrections
-    #    to replace the cached row for that date.
-    # Completed seasons keep their permanent-cache behavior above.
-    refresh_days = 14
-    refresh_start = end_date - timedelta(days=refresh_days - 1)
-
+    # Incremental freshness rule: fetch only NBA calendar dates up to today
+    # that have never completed a Yahoo daily request for this player-season.
+    # checked_dates contains both game and no-game dates, so a DNP/injury/rest
+    # day that Yahoo already answered successfully is not requested again.
+    # Transient failures are never marked checked below and therefore remain
+    # pending for the next run. Completed seasons still use the permanent-cache
+    # fast path above whenever their final CSV already exists.
     never_checked_dates = {
         pd.Timestamp(value).normalize()
         for value in candidate_dates
         if pd.Timestamp(value).normalize() not in checked_dates
     }
-    rolling_refresh_dates = (
-        {
-            pd.Timestamp(value).normalize()
-            for value in candidate_dates
-            if pd.Timestamp(value).date() >= refresh_start
-        }
-        if season == CURRENT_SEASON
-        else set()
-    )
-    pending_dates = sorted(never_checked_dates | rolling_refresh_dates)
+    pending_dates = sorted(never_checked_dates)
 
     print(
         f"[YAHOO_DAILY] {player_name} | {season} | "
         f"trade_safe_dates=yes | games_cached={len(cached)} | "
+        f"candidate_dates={len(candidate_dates)} | "
         f"dates_checked={len(checked_dates)} | "
-        f"never_checked={len(never_checked_dates)} | "
-        f"rolling_refresh_days={refresh_days if season == CURRENT_SEASON else 0} | "
-        f"rolling_refresh_dates={len(rolling_refresh_dates)} | "
         f"pending_dates={len(pending_dates)}"
     )
+    if not pending_dates:
+        print(
+            f"[YAHOO_CURRENT_CACHE] {player_name} | {season} | "
+            "CACHE CURRENT | daily_requests=0"
+        )
 
     def save_game_cache(frame):
         if frame is None or frame.empty:
