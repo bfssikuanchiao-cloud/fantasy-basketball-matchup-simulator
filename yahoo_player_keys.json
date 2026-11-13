@@ -128,7 +128,12 @@
       "name": "Jalen Green",
       "team": "PHX",
       "status": null,
-      "selected_position": "SF"
+      "selected_position": null,
+      "eligible_positions": [
+        "SG",
+        "SF",
+        "Util"
+      ]
     },
     "2025-26": {
       "player_key": "466.p.6513",

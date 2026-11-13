@@ -321,6 +321,18 @@ with detail_col:
     }).sort_values("Strength", ascending=False)
     st.dataframe(detail, hide_index=True, use_container_width=True)
 
+
+
+Prometheus_PATH = APP_FOLDER / "Prometheus.png"
+
+col1, col2, col3, col4, col5, col6, col7 = st.columns([1,1,1,1,1,1,1])
+
+with col7:
+    st.image(
+        str(Prometheus_PATH),
+        width=100
+    )
+
 # ============================================================
 # EXPORT
 # ============================================================
