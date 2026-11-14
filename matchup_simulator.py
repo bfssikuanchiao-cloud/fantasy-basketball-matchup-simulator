@@ -682,27 +682,27 @@ col1, col2, col3, col4, col5, col6, col7 = st.columns([1,1,1,1,1,1,1])
 with col2:
     st.image(
         str(Bryant_PATH),
-        width=92
+        width=62
     )
 with col3:
     st.image(
         str(Jordan_PATH),
-        width=95
+        width=64
     )
 with col4:
     st.image(
         str(James_PATH),
-        width=99
+        width=66
     )
 with col5:
     st.image(
         str(Garnett_PATH),
-        width=104
+        width=69
     )
 with col6:
     st.image(
         str(Oneal_PATH),
-        width=107
+        width=72
     )
 
 st.header("陣型")
@@ -1685,7 +1685,7 @@ col1, col2, col3, col4, col5, col6, col7 = st.columns([3,1,0.8,1.7,1,1,3])
 with col4:
     st.image(
         str(Jersey_PATH),
-        width=360
+        width=280
     )
 with col3:
     st.image(

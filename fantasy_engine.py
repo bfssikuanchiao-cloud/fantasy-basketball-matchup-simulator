@@ -3891,3 +3891,214 @@ def compare_add_drop_fast(
         "opp_debug": opp_debug,
         "scenario_debug": scenario_debug
     }
+
+"""Append this block to fantasy_engine.py (or run apply_bench_feature_patch.py)."""
+
+
+def _bench_zero_frame(n_sim):
+    return pd.DataFrame(0.0, index=np.arange(n_sim), columns=STAT_COLS)
+
+
+def _simulate_prepared_roster_by_game(prepared_roster, n_sim, rng):
+    """Draw every player-game once so Play All and Bench share identical draws."""
+    draws = {}
+    for player_name, prepared_player in prepared_roster.items():
+        for game_info in prepared_player.get("games", []):
+            weighted_df = game_info["weighted_df"]
+            weights = weighted_df["Weight"].to_numpy(dtype=float)
+            sampled_indices = rng.choice(
+                len(weighted_df), size=n_sim, replace=True, p=weights
+            )
+            game_date = pd.Timestamp(game_info["date"]).normalize().strftime("%Y-%m-%d")
+            draws[(player_name, game_date)] = (
+                weighted_df.iloc[sampled_indices][STAT_COLS]
+                .reset_index(drop=True)
+                .astype(float)
+            )
+    return draws
+
+
+def _sum_player_game_draws(draws, n_sim, selected_game_dates=None):
+    totals = _bench_zero_frame(n_sim)
+    for (player_name, game_date), frame in draws.items():
+        if isinstance(selected_game_dates, dict):
+            allowed = bool(
+                selected_game_dates.get(player_name, {}).get(game_date, False)
+            )
+            if not allowed:
+                continue
+        totals = totals.add(frame, fill_value=0.0)
+    return totals
+
+
+def _final_stat_frames(current, future):
+    raw = future.copy()
+    for stat in STAT_COLS:
+        raw[stat] = raw[stat] + float(current.get(stat, 0))
+    raw["FG%"] = np.divide(
+        raw["FGM"], raw["FGA"],
+        out=np.zeros(len(raw), dtype=float), where=raw["FGA"].to_numpy() != 0,
+    )
+    raw["FT%"] = np.divide(
+        raw["FTM"], raw["FTA"],
+        out=np.zeros(len(raw), dtype=float), where=raw["FTA"].to_numpy() != 0,
+    )
+    return raw
+
+
+def _summarize_bench_scenario(my_final, opp_final):
+    category_map = {
+        "FG%": "FG%", "FT%": "FT%", "3PM": "3PM", "Pts": "Pts",
+        "Reb": "Reb", "Ast": "Ast", "Stl": "Stl", "Blk": "Blk", "TO": "TO",
+    }
+    win_df = pd.DataFrame(index=my_final.index)
+    tie_df = pd.DataFrame(index=my_final.index)
+    margin_df = pd.DataFrame(index=my_final.index)
+    category_results = {}
+
+    for category, column in category_map.items():
+        my_values = my_final[column].to_numpy(dtype=float)
+        opp_values = opp_final[column].to_numpy(dtype=float)
+        if category in {"FG%", "FT%"}:
+            tied = np.isclose(my_values, opp_values, atol=1e-12)
+        else:
+            tied = my_values == opp_values
+        won = my_values < opp_values if category == "TO" else my_values > opp_values
+        margin = my_values - opp_values
+        win_df[category] = won.astype(int)
+        tie_df[category] = tied.astype(int)
+        margin_df[category] = margin
+        category_results[category] = {
+            "win_prob": float(np.mean(won)),
+            "tie_prob": float(np.mean(tied)),
+            "loss_prob": float(np.mean(~won & ~tied)),
+            "avg_margin": float(np.mean(margin)),
+            "p5": float(np.quantile(margin, 0.05)),
+            "p50": float(np.quantile(margin, 0.50)),
+            "p95": float(np.quantile(margin, 0.95)),
+        }
+
+    total_wins = win_df.sum(axis=1).to_numpy(dtype=int)
+    total_ties = tie_df.sum(axis=1).to_numpy(dtype=int)
+    total_losses = 9 - total_wins - total_ties
+    matchup_points = total_wins + 0.5 * total_ties
+    matchup_win = matchup_points > 4.5
+    matchup_tie = np.isclose(matchup_points, 4.5)
+    score_counts = np.bincount(total_wins, minlength=10)
+    score_df = pd.DataFrame({
+        "Wins": np.arange(10),
+        "Count": score_counts,
+        "Probability": score_counts / float(len(my_final)),
+    })
+    score_df["Score"] = score_df["Wins"].astype(str) + ":" + (9 - score_df["Wins"]).astype(str)
+
+    projected = {}
+    for category, column in category_map.items():
+        values = my_final[column].to_numpy(dtype=float)
+        if category == "FG%":
+            mean_value = float(my_final["FGM"].mean() / my_final["FGA"].mean())
+        elif category == "FT%":
+            mean_value = float(my_final["FTM"].mean() / my_final["FTA"].mean())
+        else:
+            mean_value = float(np.mean(values))
+        projected[category] = {
+            "mean": mean_value,
+            "p5": float(np.quantile(values, 0.05)),
+            "p50": float(np.quantile(values, 0.50)),
+            "p95": float(np.quantile(values, 0.95)),
+        }
+    projected["FG volume"] = {
+        "made_mean": float(my_final["FGM"].mean()),
+        "attempt_mean": float(my_final["FGA"].mean()),
+    }
+    projected["FT volume"] = {
+        "made_mean": float(my_final["FTM"].mean()),
+        "attempt_mean": float(my_final["FTA"].mean()),
+    }
+    return {
+        "categories": category_results,
+        "p_matchup_win": float(np.mean(matchup_win)),
+        "p_matchup_tie": float(np.mean(matchup_tie)),
+        "p_matchup_loss": float(np.mean(~matchup_win & ~matchup_tie)),
+        "p_ge_5": float(np.mean(total_wins >= 5)),
+        "p_ge_6": float(np.mean(total_wins >= 6)),
+        "p_ge_7": float(np.mean(total_wins >= 7)),
+        "expected_category_wins": float(np.mean(total_wins)),
+        "score_distribution_df": score_df[["Score", "Wins", "Count", "Probability"]],
+        "projected": projected,
+        "win_df": win_df,
+        "tie_df": tie_df,
+        "margin_df": margin_df,
+        "final_values": my_final,
+    }
+
+
+def compare_bench_scenarios_fast(
+    my_roster, opp_roster, schedule_df, start_date, end_date,
+    current_my, current_opp, play_all_my_selected_games,
+    bench_my_selected_games, opp_selected_games,
+    n_sim=3000, random_seed=12345,
+):
+    """Paired Monte Carlo comparison using common player-game draws."""
+    prepared_my = prepare_roster_simulation(
+        my_roster, schedule_df, start_date, end_date,
+        selected_game_dates=play_all_my_selected_games,
+    )
+    prepared_opp = prepare_roster_simulation(
+        opp_roster, schedule_df, start_date, end_date,
+        selected_game_dates=opp_selected_games,
+    )
+    rng = np.random.default_rng(random_seed)
+    my_draws = _simulate_prepared_roster_by_game(prepared_my, n_sim, rng)
+    opp_draws = _simulate_prepared_roster_by_game(prepared_opp, n_sim, rng)
+    play_all_future = _sum_player_game_draws(
+        my_draws, n_sim, play_all_my_selected_games
+    )
+    bench_future = _sum_player_game_draws(
+        my_draws, n_sim, bench_my_selected_games
+    )
+    opp_future = _sum_player_game_draws(
+        opp_draws, n_sim, opp_selected_games
+    )
+    opponent_final = _final_stat_frames(current_opp, opp_future)
+    play_all = _summarize_bench_scenario(
+        _final_stat_frames(current_my, play_all_future), opponent_final
+    )
+    bench = _summarize_bench_scenario(
+        _final_stat_frames(current_my, bench_future), opponent_final
+    )
+
+    order = ["FG%", "FT%", "3PM", "Pts", "Reb", "Ast", "Stl", "Blk", "TO"]
+    category_rows = []
+    for category in order:
+        category_rows.append({
+            "Category": category,
+            "Play All Win": play_all["categories"][category]["win_prob"],
+            "Bench Win": bench["categories"][category]["win_prob"],
+            "Delta": bench["categories"][category]["win_prob"] - play_all["categories"][category]["win_prob"],
+            "Play All Tie": play_all["categories"][category]["tie_prob"],
+            "Bench Tie": bench["categories"][category]["tie_prob"],
+        })
+    overall = pd.DataFrame([
+        {"Metric": "Matchup win", "Play All": play_all["p_matchup_win"], "Bench": bench["p_matchup_win"]},
+        {"Metric": "Matchup tie", "Play All": play_all["p_matchup_tie"], "Bench": bench["p_matchup_tie"]},
+        {"Metric": "P(>=5 category wins)", "Play All": play_all["p_ge_5"], "Bench": bench["p_ge_5"]},
+        {"Metric": "P(>=6 category wins)", "Play All": play_all["p_ge_6"], "Bench": bench["p_ge_6"]},
+        {"Metric": "P(>=7 category wins)", "Play All": play_all["p_ge_7"], "Bench": bench["p_ge_7"]},
+    ])
+    overall["Delta"] = overall["Bench"] - overall["Play All"]
+
+    score = pd.concat([
+        play_all["score_distribution_df"].assign(Scenario="Play All"),
+        bench["score_distribution_df"].assign(Scenario="Bench"),
+    ], ignore_index=True)
+    return {
+        "play_all": play_all,
+        "bench": bench,
+        "category_comparison": pd.DataFrame(category_rows),
+        "overall_comparison": overall,
+        "score_distribution_comparison": score,
+        "prepared_my": prepared_my,
+        "prepared_opp": prepared_opp,
+    }
+
